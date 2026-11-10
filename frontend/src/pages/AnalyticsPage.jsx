@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
   BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts';
-import { PhoneCall, TrendingUp, Clock, Target, Users2 } from 'lucide-react';
+import { PhoneCall, TrendingUp, Clock, Target, Users2, Radio } from 'lucide-react';
 import { api } from '../services/api.js';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card.jsx';
 import { Badge, StatusBadge } from '../components/ui/badge.jsx';
@@ -54,12 +54,19 @@ export default function AnalyticsPage() {
       {data && (
         <>
           {/* KPI cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             <Kpi icon={PhoneCall} label="Total calls" value={data.totals.totalCalls} tint="indigo" />
             <Kpi icon={TrendingUp} label="Conversion rate" value={`${data.totals.conversionRate}%`} tint="emerald" />
             <Kpi icon={Clock} label="Avg duration" value={fmtDur(data.totals.avgDuration)} tint="sky" />
             <Kpi icon={Target} label="Avg deal score" value={data.totals.avgDealScore} tint="amber" />
             <Kpi icon={Users2} label="Engagement" value={`${data.totals.engagementRate}%`} tint="purple" />
+            <Kpi
+              icon={Radio}
+              label="Phone reach"
+              value={data.phone?.attempts ? `${data.phone.reachRate}%` : '—'}
+              hint={data.phone?.attempts ? `${data.phone.reached}/${data.phone.attempts} answered` : 'no phone calls'}
+              tint="rose"
+            />
           </div>
 
           {/* Funnel + status */}
@@ -134,6 +141,12 @@ export default function AnalyticsPage() {
             <BreakdownCard title="By product" rows={data.byProduct} />
             <BreakdownCard title="By language" rows={data.byLanguage} />
             <BreakdownCard title="By channel" rows={data.byChannel} />
+            <BreakdownCard
+              title="By call outcome"
+              description="Phone attempts that connected, and why the rest did not"
+              rows={data.byOutcome}
+            />
+            <BreakdownCard title="By direction" rows={data.byDirection} />
           </div>
 
           {/* Lead pipeline + recent statuses */}
@@ -177,13 +190,14 @@ export default function AnalyticsPage() {
   );
 }
 
-function Kpi({ icon: Icon, label, value, tint }) {
+function Kpi({ icon: Icon, label, value, tint, hint }) {
   const tints = {
     indigo: 'text-indigo-400 bg-indigo-500/10',
     emerald: 'text-emerald-400 bg-emerald-500/10',
     sky: 'text-sky-400 bg-sky-500/10',
     amber: 'text-amber-400 bg-amber-500/10',
-    purple: 'text-purple-400 bg-purple-500/10'
+    purple: 'text-purple-400 bg-purple-500/10',
+    rose: 'text-rose-400 bg-rose-500/10'
   };
   return (
     <Card>
@@ -193,16 +207,20 @@ function Kpi({ icon: Icon, label, value, tint }) {
         </div>
         <div className="text-2xl font-extrabold text-white leading-none">{value}</div>
         <div className="text-[11px] text-slate-500 font-semibold mt-1.5">{label}</div>
+        {hint && <div className="text-[10px] text-slate-600 mt-0.5">{hint}</div>}
       </CardContent>
     </Card>
   );
 }
 
-function BreakdownCard({ title, rows }) {
+function BreakdownCard({ title, rows, description }) {
   const max = Math.max(1, ...(rows || []).map(r => r.calls));
   return (
     <Card>
-      <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        {description && <CardDescription className="ml-auto text-right">{description}</CardDescription>}
+      </CardHeader>
       <CardContent className="space-y-2.5">
         {(!rows || rows.length === 0) && <p className="text-xs text-slate-500">No data in window.</p>}
         {(rows || []).slice(0, 5).map(r => (

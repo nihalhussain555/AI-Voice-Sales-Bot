@@ -102,14 +102,25 @@ export const api = {
       body: JSON.stringify({ callId, apiKey: getStoredKey() })
     }),
 
-  twilioStatus: () => request(apiUrl('/api/twilio/status')),
+  // Real phone calling (Twilio). /api/phone/* is the app-facing side; Twilio
+  // itself talks to /api/twilio/* directly.
+  phoneConfig: () => request(apiUrl('/api/phone/config')),
 
-  twilioCall: (to) =>
-    request(apiUrl('/api/twilio/call-out'), {
+  phoneDial: ({ to, productKey, customerName }) =>
+    request(apiUrl('/api/phone/dial'), {
       method: 'POST',
       headers: JSON_HEADERS,
-      body: JSON.stringify({ to })
-    })
+      body: JSON.stringify({ to, productKey, customerName })
+    }),
+
+  phoneCalls: ({ activeOnly = false } = {}) =>
+    request(apiUrl(`/api/phone/calls${activeOnly ? '?active=1' : ''}`)),
+
+  phoneCall: (callSid) => request(apiUrl(`/api/phone/calls/${callSid}`)),
+
+  phoneRefresh: (callSid) => request(apiUrl(`/api/phone/calls/${callSid}/refresh`), { method: 'POST' }),
+
+  phoneHangup: (callSid) => request(apiUrl(`/api/phone/calls/${callSid}/hangup`), { method: 'POST' })
 };
 
 // Export endpoints return files, not JSON — plain links, opened by the browser.

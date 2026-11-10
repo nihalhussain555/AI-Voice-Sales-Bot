@@ -4,7 +4,7 @@ import { RefreshCw, Trash2, Download, Sparkles, ChevronDown } from 'lucide-react
 import { api, exportUrls, resolveAsset } from '../services/api.js';
 import { Card, CardContent } from '../components/ui/card.jsx';
 import { Button } from '../components/ui/button.jsx';
-import { Badge, StatusBadge } from '../components/ui/badge.jsx';
+import { Badge, StatusBadge, OutcomeBadge } from '../components/ui/badge.jsx';
 import { Select } from '../components/ui/input.jsx';
 import { Table, THead, Th, Td, Tr } from '../components/ui/table.jsx';
 import Dialog from '../components/ui/dialog.jsx';
@@ -71,7 +71,7 @@ export default function HistoryPage() {
             <Table>
               <THead><tr>
                 <Th>Date</Th><Th>Customer</Th><Th>Product</Th><Th>Channel</Th>
-                <Th>Status</Th><Th>Duration</Th><Th>Score</Th><Th className="text-right">Actions</Th>
+                <Th>Status</Th><Th>Outcome</Th><Th>Duration</Th><Th>Score</Th><Th className="text-right">Actions</Th>
               </tr></THead>
               <tbody>
                 {filtered.map(c => (
@@ -82,8 +82,14 @@ export default function HistoryPage() {
                       <div className="text-[11px] text-slate-500">{c.company}</div>
                     </Td>
                     <Td>{c.product}</Td>
-                    <Td><Badge variant="slate">{c.channel || 'browser'}</Badge></Td>
+                    <Td>
+                      <Badge variant="slate">{c.channel || 'browser'}</Badge>
+                      {c.channel === 'phone' && c.direction && (
+                        <div className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">{c.direction}</div>
+                      )}
+                    </Td>
                     <Td><StatusBadge status={c.status} /></Td>
+                    <Td>{c.channel === 'phone' ? <OutcomeBadge outcome={c.outcome} label={c.outcomeLabel} /> : <span className="text-slate-600">—</span>}</Td>
                     <Td>{fmtDur(c.duration || 0)}</Td>
                     <Td className="font-mono">{c.summary?.dealScore ?? '—'}</Td>
                     <Td className="text-right whitespace-nowrap">

@@ -30,9 +30,10 @@ The repository is split into two independently deployable apps:
 | **Recording & consent** | Consent modal, microphone capture via MediaRecorder, uploaded to the backend and playable per call. |
 | **AI summary** | Overview, requirements, objections, next steps, sentiment, and 0–100 deal score. |
 | **Sales status** | Converted / Interested / Follow-up Required / Not Interested / Demo Requested / No Response. |
-| **Analytics dashboard** | KPI cards, conversion funnel, time-series trends, and breakdowns by product, language, and channel. |
+| **Analytics dashboard** | KPI cards, conversion funnel, time-series trends, and breakdowns by product, language, channel, call outcome and direction. |
 | **Lead CRM** | Auto-extracts prospect name/company/email/phone/intent from each call, pipeline stages, notes, and CSV/JSON export. |
-| **Phone telephony (optional)** | Real inbound & outbound calls via Twilio Media Streams → Groq STT/LLM/TTS pipeline over a websocket on the API port. |
+| **Demo vs live modes** | `/call` is the browser-voice demo (no credentials needed); `/phone` is real telephony. Both feed the same history, analytics and CRM. |
+| **Phone telephony (Twilio)** | Inbound + outbound calls over Media Streams → Groq STT/LLM/TTS on the API port, with barge-in, per-attempt outcome tracking (busy / no-answer / rejected / failed / canceled), concurrency cap and a lost-callback watchdog. |
 
 ---
 
@@ -45,7 +46,7 @@ The repository is split into two independently deployable apps:
 ### Install both apps
 
 ```bash
-npm run setup        # installs backend/ and frontend/ dependencies
+npm run setup        # installs root (concurrently) + backend/ + frontend/ deps
 ```
 
 (or separately: `npm install --prefix backend && npm install --prefix frontend`)
@@ -74,7 +75,7 @@ split deployment that folder simply isn't there and the API stops serving HTML.
 ### Tests
 
 ```bash
-npm test             # backend unit tests (audio codecs, VAD, unconfigured telephony)
+npm test             # backend suite: audio/VAD + Twilio-shaped phone fixtures
 ```
 
 ---
@@ -96,9 +97,12 @@ cp frontend/.env.example frontend/.env
 | `GROQ_API_KEY` | **Enables real AI.** Free key at https://console.groq.com/keys. Without it the app runs in zero-key demo mode. |
 | `PORT` | API port (default `3001`). |
 | `GROQ_{CHAT,STT,TTS}_MODEL`, `GROQ_TTS_VOICE` | Optional model overrides. |
-| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | Enable phone telephony. Leave blank to disable. |
-| `PUBLIC_BASE_URL` | Public HTTPS URL of the API (e.g. ngrok or Render) so Twilio webhooks can reach it. |
-| `TWILIO_VALIDATE` | Set `false` only for local TwiML testing without signature validation. |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | Enable inbound phone calls. Leave blank to disable the phone feature. |
+| `TWILIO_PHONE_NUMBER` | Your Twilio number — the caller ID for outbound dialing and the line inbound calls ring. |
+| `PUBLIC_BASE_URL` | Public HTTPS URL of the API (e.g. ngrok or Render) so Twilio webhooks and the audio websocket can reach it. Required for outbound dialing. |
+| `TWILIO_VALIDATE` | Set `false` only for local TwiML testing without signature validation. Default `true`. |
+| `TWILIO_STATUS_CALLBACK` | Ask Twilio for call progress callbacks (`busy`, `no-answer`, `canceled`, …). Default `true`. |
+| `TWILIO_MAX_CONCURRENT_CALLS` | Parallel call cap; extra callers hear "all agents are busy". Default `3`. |
 | `MAX_CALL_MINUTES` | Hard cap per phone call (Groq usage guardrail, default 15). |
 | `CORS_ORIGIN` | Allowed frontend origin. `*` locally; set the deployed URL in production. |
 | `BODY_LIMIT` | Max request body (recordings are posted here), default `50mb`. |
@@ -139,7 +143,7 @@ frontend/
 └── src/
     ├── main.jsx                   # React root (no StrictMode: it breaks the speech lifecycle)
     ├── App.jsx                    # Router + React Query + toast providers
-    ├── pages/                     # CallPage, HistoryPage, AnalyticsPage, LeadsPage, SettingsPage
+    ├── pages/                     # CallPage (browser demo), PhonePage (live Twilio), History, Analytics, Leads, Settings
     ├── components/
     │   ├── AppShell.jsx           # Sidebar/nav layout, product + health context
     │   ├── AudioVisualizer.jsx    # Canvas waveform (real mic spectrum while listening)
@@ -184,11 +188,18 @@ backend/
     │   ├── salesTurn.js           # next-turn logic shared by HTTP and phone
     │   ├── summarizer.js          # AI summary + sales-status classification
     │   ├── analytics.js           # dashboard aggregation
-    │   └── telephony.js           # Twilio Media Streams: VAD → STT → turn → TTS → barge-in
-    ├── utils/audioCodecs.js       # μ-law ↔ PCM, WAV parse/build, resampling, RMS
+    │   ├── twilioClient.js        # the ONLY module that calls the Twilio SDK (test seam)
+    │   ├── callLifecycle.js       # one attempt per call: state, terminal outcome, persist once
+    │   ├── phoneService.js        # app-facing dial/hangup/refresh/capacity
+    │   └── telephony.js           # Twilio-facing webhooks + Media Streams: VAD → STT → turn → TTS → barge-in
+    ├── utils/
+    │   ├── audioCodecs.js         # μ-law ↔ PCM, WAV parse/build, resampling, RMS
+    │   └── phone.js               # E.164 input, Twilio status → outcome taxonomy, error hints
     ├── data/                      # calls.json, leads.json (created on first boot)
     ├── recordings/                # uploaded call audio
-    └── tests/telephony.test.js    # codec + VAD + unconfigured-telephony unit tests
+    └── tests/
+        ├── telephony.test.js      # codec + VAD + unconfigured-telephony unit tests
+        └── phone.test.js          # fixtures: webhooks, callbacks, dialling, live media stream
 ```
 
 ### API surface
@@ -197,22 +208,89 @@ backend/
 `GET/POST/DELETE /api/calls` · `POST /api/upload-recording` · `GET /api/analytics` ·
 `GET/POST/PATCH/DELETE /api/leads` · `POST /api/leads/extract` ·
 `GET /api/export/{calls.csv,calls.json,leads.csv}` ·
-`GET/POST /api/twilio/status` · `POST /api/twilio/voice` · `POST /api/twilio/call-out` ·
-`WS /ws/media` (phone audio).
+`GET /api/phone/config` · `POST /api/phone/dial` · `GET /api/phone/calls[?active=1]` ·
+`GET /api/phone/calls/:sid` · `POST /api/phone/calls/:sid/{refresh,hangup}` ·
+`POST /api/twilio/voice` (Twilio webhook) · `POST /api/twilio/events` (status callback) ·
+`GET /api/twilio/status` · `WS /ws/media` (phone audio).
 
 ---
 
-## 📞 Enabling real phone calls (optional)
+## 📞 Real phone calling (Twilio)
 
-1. Buy a Twilio number, then add `TWILIO_*` + `PUBLIC_BASE_URL` to `backend/.env`.
-2. Expose the API locally: `ngrok http 3001`, set `PUBLIC_BASE_URL` to the https URL, restart.
-   (When deployed to Render, `PUBLIC_BASE_URL` is just the Render service URL.)
-3. Point the number's **Voice webhook** to `{PUBLIC_BASE_URL}/api/twilio/voice`.
-4. Inbound calls run the full STT → LLM → TTS loop and are saved with
-   `channel: phone`; **Settings → Call me** places an outbound test call.
+Two separate modes, on purpose:
 
-Without Twilio credentials every telephony route answers `501` and the Settings
-page shows the setup guide instead of the dialer.
+| | Demo — `/call` | Live — `/phone` |
+| :--- | :--- | :--- |
+| Audio | your browser mic + OS speech | the public switched telephone network |
+| Needs | nothing | Twilio number + `GROQ_API_KEY` |
+| Transcript | browser Web Speech API | Groq Whisper (STT) → agent → Groq TTS |
+| Saved as | `channel: browser` | `channel: phone`, with `direction`, `callSid`, `outcome` |
+
+The demo path never touches Twilio, so it keeps working with no credentials.
+`GET /api/phone/config` reports which mode the server is actually in.
+
+### Flip-to-live checklist
+
+1. **Create the Twilio account** — console.twilio.com → the dashboard shows a
+   `Account SID` and an `API key/secret`. Use **Copy Auth Token** (the API-key
+   secret also works as `TWILIO_AUTH_TOKEN`).
+2. **Buy a number** — Phone Numbers → Manage → Buy a number. A trial number can
+   receive calls but can only *dial* numbers you have verified.
+3. **Fill in `backend/.env`** — `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+   `TWILIO_PHONE_NUMBER` (E.164) and `PUBLIC_BASE_URL`. Restart; the startup log
+   must print `phone: LIVE calling on <number>`.
+4. **Expose the API over HTTPS** — Twilio cannot reach `localhost`.
+   Local: `ngrok http 3001` → put the `https://….ngrok-free.app` URL in
+   `PUBLIC_BASE_URL` and restart (the URL changes per session, so webhooks and
+   signature validation both follow it). Deployed: `PUBLIC_BASE_URL` is the
+   service URL, e.g. `https://voicepitch-api.onrender.com`.
+5. **Set the voice webhook** — the number's *Voice* section → "A call comes in" →
+   Webhook → `POST {PUBLIC_BASE_URL}/api/twilio/voice`.
+6. **Set the status callback** — same page → "A call ends" / Status Callback →
+   `POST {PUBLIC_BASE_URL}/api/twilio/events`. Outbound dials already attach it
+   per-call (`StatusCallback`), but this is what makes inbound legs report
+   busy / no-answer / canceled.
+7. **Trial: verify a number** — Console → Phone Numbers → Verified Numbers →
+   create a verification for your own mobile. Dialing anything else on a trial
+   account fails with Twilio error **21219**, which the UI names for you.
+8. **Test inbound** — call the Twilio number from your verified phone. The agent
+   greets you, listens, answers, and you can interrupt it (barge-in).
+9. **Test outbound** — open **Phone Call** in the sidebar, type the number in
+   international format and press *Call now*. Watch the stepper go
+   *Dialing → Ringing → Talking*, then hang up.
+
+`GET /api/health` and **Settings → Phone calling** show the same readiness data
+(missing variables, webhook URLs, live call count), so step 3 is verifiable
+without making a call.
+
+### What happens when a call does not connect
+
+Every attempt — answered or not — is written to Call History exactly once with a
+terminal `outcome`. The reason comes from whichever signal arrives first
+(`<Connect>` action, status callback, websocket close) plus a watchdog for
+callbacks that never come:
+
+| Outcome | Twilio source | Meaning / what to do |
+| :--- | :--- | :--- |
+| `completed` | `CallStatus=completed` | the leg finished; transcript and summary archived |
+| `busy` | `ConnectStatus=busy` | number engaged — retry later |
+| `no-answer` | `ConnectStatus=no-answer` | rang out — retry at another time |
+| `canceled` | `CallStatus=canceled` | we hung up before answer (app *End call*) |
+| `rejected` | `ConnectStatus=rejected` | caller/screen rejected the call |
+| `not-callable` | `CallStatus=not-callable` | number cannot receive SMS/voice — check the digits |
+| `failed` | `CallStatus=failed` + `ErrorCode` | Twilio refused it — the error code and a plain-English hint are stored (e.g. 21219 = unverified trial number, 11200 = webhook unreachable) |
+| `unknown` | watchdog after `MAX_CALL_MINUTES` + 2 min | no terminal signal arrived; treat as needs-a-look |
+
+Unanswered attempts archive with sales status `No Response`; the real reason
+lives in `outcome` / `outcomeLabel`, which the History table and Analytics
+"By call outcome" panel show.
+
+> **Status of this code:** the live path is verified against Twilio-shaped
+> fixtures — real HTTP webhook/callback requests, a Twilio SDK double and a
+> scripted Media Streams client in `backend/src/tests/phone.test.js` — but no
+> call has been placed through a real Twilio account yet, because this checkout
+> has no credentials. Until then, treat items above as *implemented and
+> fixture-tested*, not *field-proven*.
 
 ---
 
@@ -266,9 +344,19 @@ needs the deployed frontend origin.
 
 ## 🧪 Testing notes
 
-- `npm test` runs the backend unit suite: μ-law round trips, WAV parse/build,
-  resampling, chunk pacing, energy VAD segmentation, and the 501 behavior of an
-  unconfigured telephony stack (real ephemeral Express server).
+- `npm test` runs the backend suite (30 tests, ~11s, no network): μ-law round trips, WAV parse/build,
+  resampling, chunk pacing, energy VAD segmentation, the 501 behavior of an
+  unconfigured telephony stack, and `tests/phone.test.js`, which drives the real
+  Express routes with Twilio-shaped fixtures — webhook and status-callback form
+  posts, a Twilio SDK double behind `setTwilioClientFactory()`, stubbed
+  STT/TTS/turn providers, and a scripted `ws` Media Streams client that sends
+  `connected`/`start`/`media`/`stop` frames. It asserts the outcomes
+  (busy, no-answer, canceled, rejected, not-callable, failed, watchdog), the
+  once-only history row, socket↔call binding via `<Parameter>`, the spoken
+  greeting reaching the transcript, barge-in stopping playback, and the
+  analytics roll-up of phone attempts by outcome and direction.
+- No test contacts Twilio or Groq, and **no test proves a real call connects** —
+  that needs credentials and a number (see the flip-to-live checklist above).
 - The browser voice path depends on a physical microphone and OS speech
   synthesis, so it can't be fully automated. Smoke-test it manually:
   1. Start a call and let the greeting finish.

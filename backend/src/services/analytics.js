@@ -1,6 +1,7 @@
 // Analytics aggregation over the call history.
 
 import { db } from '../models/db.js';
+import { outcomeLabel } from '../utils/phone.js';
 
 const STATUSES = ['Converted', 'Demo Requested', 'Interested', 'Follow-up Required', 'Not Interested', 'No Response'];
 const LEAD_STATUSES = ['New', 'Contacted', 'Qualified', 'Won', 'Lost'];
@@ -64,9 +65,9 @@ export function buildAnalytics({ days = 30, from = null, to = null, calls = null
     }));
 
   // Breakdown helpers
-  const groupBy = (keyFn) => {
+  const groupBy = (list, keyFn) => {
     const map = new Map();
-    for (const c of scoped) {
+    for (const c of list) {
       const k = keyFn(c) || 'Unknown';
       if (!map.has(k)) map.set(k, { name: k, calls: 0, conversions: 0, durationSum: 0 });
       const g = map.get(k);
@@ -79,9 +80,13 @@ export function buildAnalytics({ days = 30, from = null, to = null, calls = null
       .sort((a, b) => b.calls - a.calls);
   };
 
-  const byProduct = groupBy(c => c.product);
-  const byLanguage = groupBy(c => c.language);
-  const byChannel = groupBy(c => c.channel || 'browser');
+  const phoneCalls = scoped.filter(c => c.channel === 'phone');
+  const byProduct = groupBy(scoped, c => c.product);
+  const byLanguage = groupBy(scoped, c => c.language);
+  const byChannel = groupBy(scoped, c => c.channel || 'browser');
+  // How real phone attempts actually ended — reached, busy, no answer, failed.
+  const byOutcome = groupBy(phoneCalls, c => outcomeLabel(c.outcome));
+  const byDirection = groupBy(phoneCalls, c => (c.direction === 'inbound' ? 'Inbound' : 'Outbound'));
 
   // Conversion funnel (browser + phone combined)
   const funnel = [
@@ -109,6 +114,15 @@ export function buildAnalytics({ days = 30, from = null, to = null, calls = null
       dealScore: c.summary.dealScore
     }));
 
+  const UNREACHED = ['busy', 'no-answer', 'canceled', 'rejected', 'failed', 'not-callable'];
+  const phoneReach = phoneCalls.filter(c => c.outcome === 'completed').length;
+  const phoneStats = {
+    attempts: phoneCalls.length,
+    reached: phoneReach,
+    unanswered: phoneCalls.filter(c => UNREACHED.includes(c.outcome)).length,
+    reachRate: phoneCalls.length ? Math.round((phoneReach / phoneCalls.length) * 100) : 0
+  };
+
   return {
     window: { from: fromTs ? new Date(fromTs).toISOString() : null, to: toTs ? new Date(toTs).toISOString() : null, days: from ? null : days },
     totals: {
@@ -120,11 +134,14 @@ export function buildAnalytics({ days = 30, from = null, to = null, calls = null
       avgDuration,
       avgDealScore
     },
+    phone: phoneStats,
     statusDistribution,
     daily,
     byProduct,
     byLanguage,
     byChannel,
+    byOutcome,
+    byDirection,
     funnel,
     leadPipeline,
     topCalls

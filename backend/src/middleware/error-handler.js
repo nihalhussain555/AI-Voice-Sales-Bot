@@ -14,5 +14,10 @@ export function apiError(err, req, res, next) {
     : err.name === 'MulterError' ? 400
     : 500;
   console.error(`[${status}] ${req.method} ${req.originalUrl}:`, err.message || err);
-  res.status(status).json({ error: err.message || 'Internal server error' });
+  // err.details is the agreed place for machine-readable extras (which env vars
+  // are missing, a Twilio error hint) so the UI can act on them.
+  res.status(status).json({
+    error: err.message || 'Internal server error',
+    ...(err.details && typeof err.details === 'object' ? err.details : null)
+  });
 }

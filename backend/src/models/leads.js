@@ -130,13 +130,18 @@ ${transcriptText.slice(0, 6000)}`
   const allText = transcriptText + ' ' + (call.customerName || '') + ' ' + (call.company || '');
   const emailMatch = allText.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
   const phoneMatch = allText.match(/(\+?\d[\d\s\-().]{7,15}\d)/);
+  // On a real phone call we already know who was on the line, so the dialled or
+  // calling number beats a number the LLM may have invented from the transcript.
+  const callerNumber = call.channel === 'phone'
+    ? (call.direction === 'inbound' ? call.from : call.to) || ''
+    : '';
 
   const lead = saveLead({
     callId: call.id,
     name: extracted?.name || call.customerName || 'Unknown prospect',
     company: extracted?.company || call.company || '',
     email: extracted?.email || emailMatch?.[0] || '',
-    phone: extracted?.phone || phoneMatch?.[0]?.trim() || '',
+    phone: callerNumber || extracted?.phone || phoneMatch?.[0]?.trim() || '',
     product: call.product,
     intent: ['hot', 'warm', 'cold'].includes(extracted?.intent) ? extracted.intent : inferIntent(call.status),
     objections: extracted?.objections || call.summary?.objections || [],
@@ -176,8 +181,14 @@ export function callsCsv() {
     { key: 'company' },
     { key: 'product' },
     { key: 'channel' },
+    { label: 'direction', key: 'direction' },
     { key: 'language' },
     { label: 'status', key: 'status' },
+    { label: 'call_outcome', key: 'outcome' },
+    { label: 'call_sid', key: 'callSid' },
+    { label: 'from_number', key: 'from' },
+    { label: 'to_number', key: 'to' },
+    { label: 'twilio_error_code', key: 'twilioErrorCode' },
     { label: 'duration_seconds', key: 'duration' },
     { label: 'deal_score', get: c => c.summary?.dealScore ?? '' },
     { label: 'sentiment', get: c => c.summary?.sentiment ?? '' },

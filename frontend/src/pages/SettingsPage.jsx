@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { KeyRound, PhoneCall, RefreshCw, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { api, getStoredKey, setStoredKey } from '../services/api.js';
+import { cn } from '../lib/cn.js';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { Badge } from '../components/ui/badge.jsx';
@@ -12,30 +14,18 @@ export default function SettingsPage() {
   const { push: toast } = useToast();
   const qc = useQueryClient();
   const [keyInput, setKeyInput] = useState(getStoredKey());
-  const [phone, setPhone] = useState('');
 
   const { data: health, refetch } = useQuery({ queryKey: ['health'], queryFn: api.health });
-  const { data: twilioRaw } = useQuery({
-    queryKey: ['twilio-status'],
-    // 404/501 on an unreachable endpoint is expected in demo mode, not an error.
-    queryFn: () => api.twilioStatus().catch(() => ({ unreachable: true })),
+  const { data: phone } = useQuery({
+    queryKey: ['phone-config'],
+    queryFn: () => api.phoneConfig().catch(() => null),
     retry: false
-  });
-  const twilioState = !twilioRaw ? 'checking'
-    : twilioRaw.unreachable ? 'offline'
-    : twilioRaw.configured ? 'live'
-    : 'off';
-
-  const callOut = useMutation({
-    mutationFn: api.twilioCall,
-    onSuccess: (d) => toast(`Dialing ${d.to} from ${d.from}… check your phone.`, 'success'),
-    onError: (e) => toast(`Call failed: ${e.message}`, 'error')
   });
 
   const saveKey = () => {
     setStoredKey(keyInput.trim());
     qc.invalidateQueries({ queryKey: ['health'] });
-    qc.invalidateQueries({ queryKey: ['twilio-status'] });
+    qc.invalidateQueries({ queryKey: ['phone-config'] });
     toast(keyInput.trim() ? 'Groq key saved in this browser' : 'Groq key cleared — demo engine will be used', 'success');
   };
 
@@ -88,46 +78,51 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2.5">
             <PhoneCall className="w-4 h-4 text-emerald-400" />
             <div>
-              <CardTitle>Phone telephony (Twilio)</CardTitle>
-              <CardDescription>Real inbound calls routed through Groq STT → LLM → TTS</CardDescription>
+              <CardTitle>Phone calling (Twilio)</CardTitle>
+              <CardDescription>Real calls routed through Groq STT → LLM → TTS</CardDescription>
             </div>
             <div className="ml-auto">
-              {twilioState === 'live' ? <Badge variant="emerald">Live</Badge>
-                : twilioState === 'off' ? <Badge variant="amber">Keys missing</Badge>
-                : twilioState === 'offline' ? <Badge variant="slate">Server offline</Badge>
-                : <Badge variant="amber">Checking…</Badge>}
+              {phone == null ? <Badge variant="slate">Server offline</Badge>
+                : phone.mode === 'live' ? <Badge variant="emerald">Live mode</Badge>
+                : phone.inboundReady ? <Badge variant="amber">Inbound only</Badge>
+                : <Badge variant="amber">Demo only</Badge>}
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {twilioState !== 'live' ? (
+          {phone?.mode === 'live' ? (
+            <>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <Row label="Number" value={phone.phoneNumber} ok />
+                <Row label="Groq key on server" value={phone.aiReady ? 'configured' : 'missing'} ok={phone.aiReady} />
+                <Row label="Inbound" value={phone.inboundReady ? 'accepting calls' : 'needs credentials'} ok={phone.inboundReady} />
+                <Row label="Signature validation" value={phone.signatureValidation ? 'on' : 'off'} ok={phone.signatureValidation} />
+                <Row label="Concurrent lines" value={String(phone.maxConcurrentCalls)} ok />
+                <Row label="Max call length" value={`${phone.maxCallMinutes} min`} ok />
+              </div>
+              <div className="text-xs text-slate-400 space-y-1">
+                <p className="font-mono text-slate-300 break-all">Voice webhook → {phone.webhookUrl}</p>
+                <p className="font-mono text-slate-300 break-all">Status callback → {phone.eventsUrl}</p>
+              </div>
+              <Link to="/phone">
+                <Button variant="success" size="sm"><PhoneCall className="w-4 h-4" /> Open live calling</Button>
+              </Link>
+            </>
+          ) : (
             <div className="text-xs text-slate-400 leading-relaxed space-y-2">
-              <p>To enable real phone calls, add these to <code className="text-slate-300">.env</code> and restart the server:</p>
+              <p>Add these to <code className="text-slate-300">backend/.env</code> and restart the server{phone?.missing?.length ? <> — currently missing <code className="text-amber-300">{phone.missing.join(', ')}</code></> : ''}:</p>
               <pre className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 text-[11px] text-slate-300 overflow-x-auto">{`TWILIO_ACCOUNT_SID=AC…
 TWILIO_AUTH_TOKEN=…
 TWILIO_PHONE_NUMBER=+1…
-PUBLIC_BASE_URL=https://<your-ngrok>.ngrok-free.io`}</pre>
-              <p>Then point your Twilio number's <strong>Voice webhook</strong> to
-                <code className="text-slate-300"> {`{PUBLIC_BASE_URL}/api/twilio/voice`}</code>.
-                Run the server through ngrok (<code className="text-slate-300">ngrok http 3001</code>) so Twilio can reach it.</p>
-              <p className="text-amber-400/90">Note: Groq's phone TTS voice is English-only; Hindi/Telugu calls respond with English audio on the phone channel (browser calls keep native multilingual voice).</p>
+PUBLIC_BASE_URL=https://<your-public-https-host>`}</pre>
+              <p>Then in the Twilio console set the number&apos;s <strong>Voice webhook</strong> to
+                <code className="text-slate-300"> {'{PUBLIC_BASE_URL}'}/api/twilio/voice</code> and the <strong>Status Callback</strong> to
+                <code className="text-slate-300"> {'{PUBLIC_BASE_URL}'}/api/twilio/events</code>.
+                Run the backend through ngrok (<code className="text-slate-300">ngrok http 3001</code>) or deploy it so Twilio can reach it.</p>
+              <p>Trial accounts can only dial phone numbers verified in the Twilio console, and inbound calls from arbitrary
+                numbers need a live (paid) number.</p>
+              <p className="text-amber-400/90">Groq&apos;s phone TTS voice is English-only; Hindi/Telugu calls respond with English audio on the phone channel (browser calls keep native multilingual voice).</p>
             </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-4 text-xs">
-                <span className="flex items-center gap-1.5 text-slate-400">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  Number: <span className="font-mono text-slate-200">{twilioRaw.phoneNumber || '—'}</span>
-                </span>
-                <span className="text-slate-500">Webhook: <code className="text-slate-300">{twilioRaw.webhookHint || 'set PUBLIC_BASE_URL'}</code></span>
-              </div>
-              <div className="flex gap-2">
-                <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+15551234567 — your mobile for a test call" />
-                <Button variant="success" disabled={!phone.trim() || callOut.isPending} onClick={() => callOut.mutate(phone.trim())}>
-                  <PhoneCall className="w-4 h-4" /> Call me
-                </Button>
-              </div>
-            </>
           )}
         </CardContent>
       </Card>
@@ -136,10 +131,20 @@ PUBLIC_BASE_URL=https://<your-ngrok>.ngrok-free.io`}</pre>
       <Card>
         <CardHeader><CardTitle>About</CardTitle></CardHeader>
         <CardContent className="text-xs text-slate-400 leading-relaxed space-y-1">
-          <p>VoicePitch AI{health?.version ? ` v${health.version}` : ''} — browser voice calls via the Web Speech API, live transcripts, AI summaries, analytics, lead CRM and optional phone telephony.</p>
+          <p>VoicePitch AI{health?.version ? ` v${health.version}` : ''} — demo voice calls in the browser (Web Speech API) and real phone calls through Twilio, with live transcripts, AI summaries, analytics and a lead CRM.</p>
           <p>Browser recording captures your microphone channel; the bot voice is synthesized locally via TTS.</p>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function Row({ label, value, ok }) {
+  return (
+    <div className="flex items-center gap-2 bg-slate-950/50 border border-slate-800/60 rounded-xl px-3 py-2">
+      <CheckCircle2 className={cn('w-3.5 h-3.5 shrink-0', ok ? 'text-emerald-400' : 'text-amber-400')} />
+      <span className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">{label}</span>
+      <span className="ml-auto text-xs text-slate-200 font-semibold truncate">{value}</span>
     </div>
   );
 }

@@ -61,8 +61,47 @@ export const twilioConfig = () => ({
   phoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, ''),
   validate: (process.env.TWILIO_VALIDATE ?? 'true') !== 'false',
-  maxCallMinutes: positiveInt(process.env.MAX_CALL_MINUTES, 15)
+  maxCallMinutes: positiveInt(process.env.MAX_CALL_MINUTES, 15),
+  // Ask Twilio to report live progress of each call.
+  statusCallback: enabled(process.env.TWILIO_STATUS_CALLBACK, true),
+  maxConcurrentCalls: positiveInt(process.env.TWILIO_MAX_CONCURRENT_CALLS, 3)
 });
+
+// What the phone feature can actually do right now, with the reason when it
+// can't. Inbound needs only the API credentials (the number's webhook is set in
+// the Twilio console); outbound dialing additionally needs the sender number and
+// a public URL for Twilio to send audio and callbacks to.
+export function twilioReadiness() {
+  const c = twilioConfig();
+  const need = (names) => names.filter(([, v]) => !v).map(([k]) => k);
+  const credentials = [
+    ['TWILIO_ACCOUNT_SID', c.accountSid],
+    ['TWILIO_AUTH_TOKEN', c.authToken]
+  ];
+  const dialing = [
+    ...credentials,
+    ['TWILIO_PHONE_NUMBER', c.phoneNumber],
+    ['PUBLIC_BASE_URL', c.publicBaseUrl]
+  ];
+  const inboundMissing = need(credentials);
+  const dialMissing = need(dialing);
+  return {
+    mode: dialMissing.length ? 'off' : 'live',
+    inboundReady: inboundMissing.length === 0,
+    dialReady: dialMissing.length === 0,
+    inboundMissing,
+    dialMissing,
+    aiReady: Boolean(groqConfig.apiKey()),
+    webhookUrl: c.publicBaseUrl ? `${c.publicBaseUrl}/api/twilio/voice` : null,
+    eventsUrl: c.publicBaseUrl ? `${c.publicBaseUrl}/api/twilio/events` : null,
+    phoneNumber: c.phoneNumber || null,
+    publicBaseUrl: c.publicBaseUrl || null,
+    validate: c.validate,
+    statusCallback: c.statusCallback,
+    maxCallMinutes: c.maxCallMinutes,
+    maxConcurrentCalls: c.maxConcurrentCalls
+  };
+}
 
 export function ensureDataDirs() {
   for (const dir of [paths.data, paths.recordings]) {

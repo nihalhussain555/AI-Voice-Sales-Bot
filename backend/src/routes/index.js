@@ -9,6 +9,7 @@ import analyticsRoutes from './analytics.routes.js';
 import leadsRoutes from './leads.routes.js';
 import exportRoutes from './export.routes.js';
 import recordingsRoutes from './recordings.routes.js';
+import phoneRoutes from './phone.routes.js';
 
 export default function registerRoutes(app, { telephonyRouter } = {}) {
   app.use('/api/health', healthRoutes);
@@ -20,6 +21,8 @@ export default function registerRoutes(app, { telephonyRouter } = {}) {
   app.use('/api/leads', leadsRoutes);
   app.use('/api/export', exportRoutes);
   app.use('/api', recordingsRoutes);
+  // Outbound dialing + live call status for the UI (needs app.locals.phoneService).
+  app.use('/api/phone', phoneRoutes);
 
   // Twilio webhooks + media stream endpoints live in the telephony service and
   // must mount before any SPA catch-all.

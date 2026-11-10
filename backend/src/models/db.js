@@ -125,6 +125,9 @@ export const db = {
   saveCall: (callData) => {
     const calls = readDB();
     const newCall = {
+      // Phone/CRM fields (channel, callSid, direction, from, to, mode, outcome…)
+      // must survive, so start from the payload and only fill in defaults.
+      ...callData,
       id: callData.id || `call-${Date.now()}`,
       timestamp: callData.timestamp || new Date().toISOString(),
       customerName: callData.customerName || "Customer",

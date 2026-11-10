@@ -9,10 +9,12 @@ import { serverConfig, paths, ensureDataDirs } from './config/env.js';
 import registerRoutes from './routes/index.js';
 import { notFound, apiError } from './middleware/error-handler.js';
 
-export function createApp({ telephonyRouter } = {}) {
+export function createApp({ telephonyRouter, phoneService } = {}) {
   ensureDataDirs();
 
   const app = express();
+
+  if (phoneService) app.locals.phoneService = phoneService;
 
   app.use(cors({ origin: serverConfig.corsOrigin }));
   app.use(express.json({ limit: serverConfig.bodyLimit }));

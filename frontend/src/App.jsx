@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from './components/ui/toast.jsx';
 import AppShell from './components/AppShell.jsx';
 import CallPage from './pages/CallPage.jsx';
+import PhonePage from './pages/PhonePage.jsx';
 import HistoryPage from './pages/HistoryPage.jsx';
 import AnalyticsPage from './pages/AnalyticsPage.jsx';
 import LeadsPage from './pages/LeadsPage.jsx';
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/" element={<AppShell />}>
               <Route index element={<Navigate to="/call" replace />} />
               <Route path="call" element={<CallPage />} />
+              <Route path="phone" element={<PhonePage />} />
               <Route path="history" element={<HistoryPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="leads" element={<LeadsPage />} />

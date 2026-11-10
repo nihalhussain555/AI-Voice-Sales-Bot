@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { NavLink, Outlet, useOutletContext } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Bot, Phone, History, BarChart3, Users, Settings, Layers, KeyRound
+  Bot, Phone, PhoneCall, History, BarChart3, Users, Settings, Layers, KeyRound
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { cn } from '../lib/cn.js';
@@ -10,7 +10,8 @@ import { Badge } from '../components/ui/badge.jsx';
 import ProductPicker from '../components/ProductPicker.jsx';
 
 const NAV = [
-  { to: '/call', label: 'Live Call', icon: Phone },
+  { to: '/call', label: 'Demo Call', icon: Phone },
+  { to: '/phone', label: 'Phone Call', icon: PhoneCall },
   { to: '/history', label: 'Call History', icon: History },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/leads', label: 'Leads CRM', icon: Users },

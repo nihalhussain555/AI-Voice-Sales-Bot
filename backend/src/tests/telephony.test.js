@@ -170,14 +170,16 @@ test('EnergyVad: explicit gate flushes after the silence window, honors min spee
   assert.ok(flushed3 && flushed3.length > 0, 'adaptive vad flushes on trailing silence');
 });
 
-test('createTelephony without TWILIO_* env: not configured, routes answer 501, GET status says false', async () => {
+test('createTelephony without TWILIO_* env: not configured, webhooks answer 501, GET status reports off', async () => {
   const saved = {};
   const envKeys = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_PHONE_NUMBER', 'PUBLIC_BASE_URL', 'TWILIO_VALIDATE'];
   for (const k of envKeys) { saved[k] = process.env[k]; delete process.env[k]; }
 
   const { createTelephony, EnergyVad: vadClass } = await import('../services/telephony.js');
+  const { createCallLifecycle } = await import('../services/callLifecycle.js');
+  const lifecycle = createCallLifecycle({ db: { saveCall: (c) => c } });
   const app = express();
-  const tele = createTelephony();
+  const tele = createTelephony({ lifecycle });
   assert.equal(tele.twilioConfigured, false);
   assert.equal(typeof tele.attachWebSocket, 'function');
   assert.equal(typeof vadClass, 'function');
@@ -187,33 +189,29 @@ test('createTelephony without TWILIO_* env: not configured, routes answer 501, G
   await new Promise((r) => server.once('listening', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    const voice = await fetch(`${base}/api/twilio/voice`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'CallSid=CAtest&From=%2B15005550006&To=%2B15005550001'
-    });
+    const form = { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'CallSid=CAtest&From=%2B15005550006&To=%2B15005550001' };
+
+    const voice = await fetch(`${base}/api/twilio/voice`, form);
     assert.equal(voice.status, 501);
     assert.match((await voice.text()).toLowerCase(), /not configured/);
 
-    const statusCb = await fetch(`${base}/api/twilio/status`, {
+    const statusCb = await fetch(`${base}/api/twilio/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'CallSid=CAtest&CallStatus=completed'
     });
     assert.equal(statusCb.status, 501);
 
-    const callOut = await fetch(`${base}/api/twilio/call-out`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: '+15551234567' })
-    });
-    assert.equal(callOut.status, 501);
-
     const status = await fetch(`${base}/api/twilio/status`);
     assert.equal(status.status, 200);
-    assert.deepEqual(await status.json(), { configured: false });
+    const body = await status.json();
+    assert.equal(body.configured, false, 'nothing to receive inbound calls with');
+    assert.equal(body.mode, 'off', 'and therefore no live dialing either');
+    assert.ok(body.missing.includes('TWILIO_ACCOUNT_SID'));
+    assert.equal(body.activeCalls, 0);
   } finally {
     await new Promise((r) => server.close(r));
+    lifecycle.stop();
     for (const k of envKeys) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];

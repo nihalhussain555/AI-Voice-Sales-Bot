@@ -1,15 +1,18 @@
-// Twilio phone telephony: inbound voice webhook, Media Streams websocket audio
-// pipeline (VAD -> STT -> sales turn -> TTS with barge-in), click-to-call,
-// and call persistence into the shared calls DB.
+// Twilio-facing half of phone calling: the inbound voice webhook, the Media
+// Streams websocket audio pipeline (VAD -> STT -> sales turn -> TTS with
+// barge-in), and Twilio's call-status callbacks.
+//
+// Call state and persistence are NOT decided here — they live in callLifecycle,
+// which both this module and the app-facing phoneService share. This module only
+// produces transcripts and reports what it observed.
 
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import Twilio from 'twilio';
+import { twilioConfig, twilioReadiness, groqConfig } from '../config/env.js';
 import { groqTranscribe, groqTts } from './groqClient.js';
-import { generateTurn, resolveProduct } from './salesTurn.js';
-import { generateConversationSummary } from './summarizer.js';
-import { db } from '../models/db.js';
-import { groqConfig, twilioConfig } from '../config/env.js';
+import { generateTurn } from './salesTurn.js';
+import { buildConnectTwiML, validateSignature } from './twilioClient.js';
+import { OUTCOME } from '../utils/phone.js';
 import {
   mulawBufferToLinear,
   buildWav,
@@ -26,6 +29,9 @@ const CHUNK_SAMPLES = 160; // 20ms at 8kHz
 const LOOKBACK_CHUNKS = 15; // ~300ms of recent audio kept during playback
 const PRODUCT_KEY = 'devpulse';
 const FALLBACK_REPLY = 'Sorry, I am having trouble connecting. Please try again.';
+// After the audio stream ends we wait this long for Twilio's own terminal
+// callback (which carries busy / no-answer / canceled), and only then infer.
+const TERMINAL_GRACE_MS = 2500;
 
 function serverApiKey() {
   return groqConfig.apiKey();
@@ -153,30 +159,32 @@ function trimSilence(pcm, gate, sampleRate, silenceMs = 200) {
   return pcm.slice(start, end);
 }
 
+function sayAndHangup(message) {
+  const safe = String(message).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  return `<?xml version="1.0" encoding="UTF-8"?><Response><Say>${safe}</Say><Hangup/></Response>`;
+}
+
 // ---------------------------------------------------------------------------
 // createTelephony
+// providers exists so the audio pipeline can be exercised without network
+// access; production always uses the real Groq functions.
 // ---------------------------------------------------------------------------
-export function createTelephony() {
+export function createTelephony({ lifecycle, providers } = {}) {
+  if (!lifecycle) throw new Error('createTelephony requires a callLifecycle instance');
   const {
-    accountSid,
-    authToken,
-    phoneNumber,
-    publicBaseUrl,
-    validate: doValidate,
-    maxCallMinutes
-  } = twilioConfig();
-  const twilioConfigured = Boolean(accountSid && authToken);
+    transcribe = groqTranscribe,
+    tts = groqTts,
+    turn = generateTurn
+  } = providers || {};
 
   const router = express.Router();
   router.use(express.urlencoded({ extended: false }));
   router.use(express.json());
 
-  // Pending inbound call metadata pushed by the /voice webhook, consumed FIFO
-  // by arriving media-stream websockets.
+  // Inbound call metadata from the /voice webhook, used only if the websocket's
+  // own start parameters are missing (old TwiML, or a stream we did not create).
   const pendingCalls = [];
-  // callSid -> live session
-  const sessions = new Map();
-  let lastIncomingMeta = null;
+  const sockets = new Set();
 
   const notConfigured = (req, res) =>
     res.status(501).json({ error: 'Telephony not configured — set TWILIO_* env vars' });
@@ -184,59 +192,89 @@ export function createTelephony() {
   // ------------------------------------------------------------------ routes
 
   router.post('/api/twilio/voice', (req, res) => {
-    if (!twilioConfigured) return notConfigured(req, res);
+    const cfg = twilioConfig();
+    if (!cfg.accountSid || !cfg.authToken) return notConfigured(req, res);
     try {
       const signature = req.headers['x-twilio-signature'];
-      if (doValidate && publicBaseUrl) {
-        const url = `${publicBaseUrl}/api/twilio/voice`;
-        let valid = false;
-        try {
-          valid = Twilio.validateRequest(authToken, signature, url, req.body || {});
-        } catch (err) {
-          logErr('signature validation threw:', err.message);
-        }
-        if (!valid) {
-          log('rejected voice webhook: bad or missing X-Twilio-Signature');
-          return res.status(403).type('text/plain').send('Invalid Twilio signature');
-        }
+      const url = cfg.publicBaseUrl ? `${cfg.publicBaseUrl}/api/twilio/voice` : null;
+      const sig = url ? validateSignature({ url, signature }) : { checked: false, valid: true };
+      if (sig.checked && !sig.valid) {
+        log('rejected voice webhook: bad or missing X-Twilio-Signature');
+        return res.status(403).type('text/plain').send('Invalid Twilio signature');
       }
 
-      const callSid = req.body.CallSid;
-      const meta = {
-        callSid,
-        from: req.body.From || '',
-        to: req.body.To || phoneNumber,
-        customerName: req.body.CustomerName || (req.body.From ? `Caller ${req.body.From}` : 'Phone prospect'),
-        queuedAt: Date.now()
-      };
+      const callSid = req.body.CallSid || null;
+      const from = req.body.From || '';
+      const to = req.body.To || cfg.phoneNumber;
+      const customerName = req.body.CustomerName || (from ? `Caller ${from}` : 'Phone prospect');
+      const ready = twilioReadiness();
+
+      // No AI key means no speech-to-text and no text-to-speech: tell the caller
+      // instead of letting the line go silent, and log the failed attempt.
+      if (!ready.aiReady) {
+        logErr('inbound call rejected: GROQ_API_KEY is not configured');
+        lifecycle.startAttempt({ callSid, direction: 'inbound', from, to, customerName, productKey: PRODUCT_KEY });
+        lifecycle.finalize(callSid, OUTCOME.FAILED, 'no-ai-key');
+        return res.type('text/xml').send(sayAndHangup(
+          'Our voice assistant is temporarily unavailable. Please try again later. Goodbye.'
+        ));
+      }
+
+      if (!lifecycle.hasCapacity()) {
+        log(`inbound call ${callSid} refused: at capacity`);
+        lifecycle.startAttempt({ callSid, direction: 'inbound', from, to, customerName, productKey: PRODUCT_KEY });
+        lifecycle.finalize(callSid, OUTCOME.BUSY, 'over-capacity');
+        return res.type('text/xml').send(sayAndHangup(
+          'All our agents are on another call right now. Please try again in a moment. Goodbye.'
+        ));
+      }
+
+      const meta = { callSid, from, to, customerName, productKey: PRODUCT_KEY, queuedAt: Date.now() };
       if (callSid) {
         pendingCalls.push(meta);
-        lastIncomingMeta = meta;
-        // Expire metadata whose websocket never arrived.
+        lifecycle.startAttempt({ ...meta, direction: 'inbound' });
         setTimeout(() => {
           const idx = pendingCalls.indexOf(meta);
           if (idx !== -1) pendingCalls.splice(idx, 1);
         }, 30000).unref();
       }
 
-      const vr = new Twilio.twiml.VoiceResponse();
-      const connect = vr.connect();
-      connect.stream({ url: mediaStreamUrl(req) });
-      return res.type('text/xml').send(vr.toString());
+      return res.type('text/xml').send(buildConnectTwiML({
+        wsUrl: mediaStreamUrl(req),
+        eventsUrl: cfg.publicBaseUrl ? `${cfg.publicBaseUrl}/api/twilio/events` : null,
+        callSid,
+        extraParams: { direction: 'inbound', from, to }
+      }));
     } catch (err) {
       logErr('voice webhook error:', err);
-      return res.status(500).type('text/plain').send('Voice webhook error');
+      return res.status(500).type('text/xml').send(sayAndHangup('Sorry, something went wrong. Goodbye.'));
     }
   });
 
-  router.post('/api/twilio/status', async (req, res) => {
-    if (!twilioConfigured) return notConfigured(req, res);
+  // Call progress: StatusCallback (CallStatus), the <Connect action> (leg end
+  // status + ConnectFailReason) and any stream status all land here.
+  router.post('/api/twilio/events', async (req, res) => {
+    const cfg = twilioConfig();
+    if (!cfg.accountSid || !cfg.authToken) return notConfigured(req, res);
     try {
-      const { CallSid, CallStatus, Direction, CallDuration } = req.body || {};
-      log(`status callback: ${CallStatus} dir=${Direction} sid=${CallSid} duration=${CallDuration}`);
-      const session = (CallSid && sessions.get(CallSid)) || lastIncomingMeta && sessions.get(lastIncomingMeta.callSid);
-      if (session && ['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(CallStatus)) {
-        await finalizeSession(session, 'status-callback');
+      const signature = req.headers['x-twilio-signature'];
+      const url = cfg.publicBaseUrl ? `${cfg.publicBaseUrl}/api/twilio/events` : null;
+      const sig = url ? validateSignature({ url, signature }) : { checked: false, valid: true };
+      if (sig.checked && !sig.valid) {
+        // Do not discard status over a signature mismatch (a changed tunnel URL
+        // is the common cause); the call-controlling webhook stays strict.
+        logErr('status callback signature mismatch — processing anyway:', sig.error || 'invalid');
+      }
+      const params = req.body || {};
+      log(`status callback: CallStatus=${params.CallStatus} ConnectStatus=${params.ConnectStatus} ` +
+        `ErrorCode=${params.ErrorCode || ''} sid=${params.CallSid}`);
+      const attempt = await lifecycle.applyParams(params, { source: params.ConnectStatus ? 'connect-action' : 'status-callback' });
+      if (attempt?.terminal) {
+        for (const s of sockets) {
+          if (s.callSid === attempt.callSid || (attempt.callSid && s.keys?.includes(attempt.callSid))) {
+            s.closeSocket?.('twilio reported call ended');
+          }
+        }
       }
       return res.status(200).type('text/xml').send('<Response/>');
     } catch (err) {
@@ -246,47 +284,22 @@ export function createTelephony() {
   });
 
   router.get('/api/twilio/status', (req, res) => {
-    if (!twilioConfigured) return res.json({ configured: false });
-    return res.json({
-      configured: true,
-      phoneNumber: phoneNumber || null,
-      webhookHint: publicBaseUrl ? `${publicBaseUrl}/api/twilio/voice` : null,
-      activeCalls: sessions.size
+    const ready = twilioReadiness();
+    res.json({
+      configured: ready.inboundReady,
+      mode: ready.mode,
+      phoneNumber: ready.phoneNumber,
+      webhookUrl: ready.webhookUrl,
+      eventsUrl: ready.eventsUrl,
+      missing: ready.dialMissing,
+      aiReady: ready.aiReady,
+      activeCalls: lifecycle.activeCount()
     });
   });
 
-  router.post('/api/twilio/call-out', async (req, res) => {
-    if (!twilioConfigured) return notConfigured(req, res);
-    try {
-      const to = (req.body && req.body.to || '').trim();
-      if (!to) return res.status(400).json({ error: 'Missing "to" phone number' });
-      const webhook = publicBaseUrl ? `${publicBaseUrl}/api/twilio/voice` : null;
-      if (!webhook) return res.status(500).json({ error: 'PUBLIC_BASE_URL not configured — Twilio needs a public voice webhook URL' });
-      if (!phoneNumber) return res.status(500).json({ error: 'TWILIO_PHONE_NUMBER not configured' });
-
-      const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
-      const form = new URLSearchParams({ To: to, From: phoneNumber, Url: webhook });
-      const twRes = await fetch(
-        `https://api.twilio.com/2019-07-31/Accounts/${encodeURIComponent(accountSid)}/Calls.json`,
-        { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString() }
-      );
-      const text = await twRes.text().catch(() => '');
-      if (!twRes.ok) {
-        logErr(`call-out failed (${twRes.status}): ${text.slice(0, 300)}`);
-        return res.status(502).json({ error: 'Twilio rejected the outbound call', detail: text.slice(0, 300) });
-      }
-      const data = JSON.parse(text);
-      log(`call-out placed: ${data.sid} to ${to}`);
-      return res.json({ ok: true, callSid: data.sid, from: phoneNumber, to });
-    } catch (err) {
-      logErr('call-out error:', err);
-      return res.status(500).json({ error: 'Outbound call failed' });
-    }
-  });
-
   function mediaStreamUrl(req) {
-    // PUBLIC_BASE_URL host wins; fall back to the request host for LAN/demo use.
-    const base = publicBaseUrl || `${req.protocol}://${req.get('host')}`;
+    // PUBLIC_BASE_URL host wins; fall back to the request host for LAN/testing.
+    const base = twilioConfig().publicBaseUrl || `${req.protocol}://${req.get('host')}`;
     const wsBase = base.startsWith('https')
       ? base.replace(/^https/, 'wss')
       : base.replace(/^http/, 'ws');
@@ -313,44 +326,119 @@ export function createTelephony() {
   }
 
   function handleMediaSocket(ws) {
-    // Associate this websocket with the most recent unassigned inbound call.
-    // LIMITATION: TwiML <Stream> cannot carry a callSid query param, so the
-    // webhook->socket pairing is FIFO by arrival order. That is reliable for a
-    // demo with low concurrency, but two inbound calls racing could cross tags.
-    const meta = pendingCalls.shift() || lastIncomingMeta || { callSid: null, from: '', to: '' };
     const state = {
       ws,
-      callSid: meta.callSid,
-      from: meta.from,
-      to: meta.to,
-      customerName: meta.customerName,
+      callSid: null,
+      keys: [],
+      from: '',
+      to: '',
+      customerName: null,
+      productKey: PRODUCT_KEY,
       startedAt: Date.now(),
       vad: new EnergyVad({ sampleRate: 8000 }),
       transcript: [],
-      productKey: PRODUCT_KEY,
       playing: false,
       playTimer: null,
+      playResolve: null,
+      closeTimer: null,
       busy: false,
       speakChain: Promise.resolve(),
       lookback: [],
-      finalized: false,
       maxTimer: null,
-      pendingTtsBuffer: null
+      ended: false,
+      streamSid: null,
+      closeSocket: (why) => {
+        try { ws.close(); } catch { /* ignore */ }
+        if (why) log(`socket closed for ${state.callSid}: ${why}`);
+      },
+      getTranscript: () => state.transcript
     };
-    if (state.callSid) sessions.set(state.callSid, state);
-    log(`media websocket connected for call ${state.callSid || '(unassigned)'}`);
+    sockets.add(state);
+    log('media websocket opened');
 
     ws.on('message', (raw) => {
       handleWsMessage(state, raw).catch((err) => logErr('ws message error:', err));
     });
     ws.on('close', () => {
-      clearInterval(state.playTimer);
-      state.playTimer = null;
+      haltPlayback(state);
       clearTimeout(state.maxTimer);
-      finalizeSession(state, 'ws-close').catch((err) => logErr('finalize error:', err));
-      if (state.callSid) sessions.delete(state.callSid);
+      state.maxTimer = null;
+      endStream(state, 'ws-close');
+      sockets.delete(state);
     });
     ws.on('error', (err) => logErr('ws error:', err.message));
+  }
+
+  // Bind this socket to its call attempt. TwiML <Parameter> values arrive in the
+  // start event, which is the reliable pairing route; the webhook FIFO queue is
+  // only a fallback for streams that carry no parameters.
+  function identifyStream(state, msg) {
+    const params = (msg.start && msg.start.parameters) || {};
+    const streamCallSid = msg.start?.callSid || null;
+    const cfg = twilioConfig();
+    const keys = [params.dialToken, params.callSid, streamCallSid].filter(Boolean);
+
+    if (!keys.length && pendingCalls.length) {
+      const meta = pendingCalls.shift();
+      keys.push(meta.callSid);
+      state.from = meta.from;
+      state.to = meta.to;
+      state.customerName = meta.customerName;
+      state.productKey = meta.productKey || PRODUCT_KEY;
+    }
+
+    state.keys = keys;
+    state.callSid = streamCallSid || keys[0] || null;
+    if (params.direction === 'inbound') {
+      state.from = params.from || state.from;
+      state.to = params.to || state.to;
+    }
+
+    let attempt = lifecycle.get(keys);
+    if (attempt && streamCallSid && attempt.callSid !== streamCallSid) {
+      // Outbound dials are registered under the token that rode inside the TwiML;
+      // now that the real CallSid is known, adopt it so every later callback
+      // (always keyed by CallSid) resolves to this same attempt.
+      lifecycle.rekey(attempt.callSid, streamCallSid);
+      keys.push(streamCallSid);
+      attempt = lifecycle.get(streamCallSid);
+    }
+    if (!attempt) {
+      attempt = lifecycle.startAttempt({
+        callSid: state.callSid,
+        direction: params.direction === 'inbound' ? 'inbound' : 'outbound',
+        from: params.from || state.from || '',
+        to: params.to || state.to,
+        productKey: params.productKey || state.productKey,
+        customerName: state.customerName || (params.from ? `Caller ${params.from}` : 'Phone prospect')
+      });
+      if (state.callSid && state.callSid !== attempt.callSid) keys.push(attempt.callSid, state.callSid);
+    }
+    if (attempt) {
+      state.customerName = state.customerName || attempt.customerName;
+      state.productKey = params.productKey || attempt.productKey || PRODUCT_KEY;
+      lifecycle.bindSession([...keys, attempt.callSid], {
+        getTranscript: state.getTranscript,
+        closeSocket: state.closeSocket,
+        streamSid: msg.streamSid || null
+      });
+      state.keys = [...new Set([...keys, attempt.callSid])];
+    }
+    log(`media stream ${msg.streamSid || '(no sid)'} bound to call ${state.callSid || '(unidentified)'}`);
+  }
+
+  function endStream(state, reason) {
+    if (state.ended) return;
+    state.ended = true;
+    clearTimeout(state.closeTimer);
+    // Twilio's own terminal callback usually beats us here with the real reason
+    // (busy/no-answer/canceled), so wait briefly before inferring from the audio.
+    state.closeTimer = setTimeout(() => {
+      if (lifecycle.get(state.keys)?.terminal) return;
+      const spoken = state.transcript.filter((m) => m && m.text).length > 1;
+      lifecycle.noteOutcome(state.keys, spoken ? OUTCOME.COMPLETED : OUTCOME.UNKNOWN, reason);
+    }, TERMINAL_GRACE_MS);
+    state.closeTimer.unref?.();
   }
 
   async function handleWsMessage(state, raw) {
@@ -364,39 +452,51 @@ export function createTelephony() {
       case 'connected':
         sendJson(state.ws, { event: 'connected' }); // required echo per Media Streams v1
         break;
-      case 'start':
+      case 'start': {
+        identifyStream(state, msg);
         state.startedAt = Date.now();
+        lifecycle.noteConnected(state.keys);
         startMaxCallTimer(state);
-        await speak(state, greetingText(state));
+        const greeting = await greetingText(state);
+        // The agent's opening line belongs in the transcript (and therefore in the
+        // call history and summary), not just in the audio.
+        state.transcript.push({ sender: 'bot', text: greeting, time: callTime(state) });
+        await speak(state, greeting);
         break;
+      }
       case 'media':
         handleMediaChunk(state, msg.media && msg.media.chunk);
         break;
-      case 'stop':
-        clearInterval(state.playTimer);
-        state.playTimer = null;
-        await finalizeSession(state, 'stop-event');
-        break;
       case 'mark':
+        break;
+      case 'stop':
+        haltPlayback(state);
+        clearTimeout(state.maxTimer);
+        state.maxTimer = null;
+        endStream(state, 'stream-stop-event');
+        break;
       default:
         break;
     }
   }
 
   function startMaxCallTimer(state) {
+    const { maxCallMinutes } = twilioConfig();
     const ms = Math.max(1, maxCallMinutes) * 60000;
     state.maxTimer = setTimeout(() => {
       log(`call ${state.callSid} hit MAX_CALL_MINUTES, wrapping up`);
       sendJson(state.ws, { event: 'clear' });
-      speak(state, 'I need to let you go now. Thanks for your time!')
-        .finally(() => setTimeout(() => { try { state.ws.close(); } catch { /* ignore */ } }, 800));
+      const bye = 'I need to let you go now. Thanks for your time!';
+      state.transcript.push({ sender: 'bot', text: bye, time: callTime(state) });
+      speak(state, bye)
+        .finally(() => setTimeout(() => state.closeSocket('max call duration'), 800));
     }, ms);
     state.maxTimer.unref();
   }
 
   async function greetingText(state) {
     try {
-      const { reply } = await generateTurn({
+      const { reply } = await turn({
         message: '', history: [], productKey: state.productKey, language: 'English', apiKey: null
       });
       return reply;
@@ -418,9 +518,7 @@ export function createTelephony() {
         state.vad.loudRun++;
         if (state.vad.loudRun >= 3 && !state.busy) {
           log(`barge-in detected in call ${state.callSid}`);
-          clearInterval(state.playTimer);
-          state.playTimer = null;
-          state.playing = false;
+          haltPlayback(state);
           sendJson(state.ws, { event: 'clear' });
           // Rebuild the interrupted utterance from the lookback window so the
           // interrupting words are not lost.
@@ -464,19 +562,12 @@ export function createTelephony() {
     state.vad.reset();
     try {
       const key = serverApiKey();
-      if (!key) {
-        log('no GROQ_API_KEY — apologizing and ending the call');
-        await speak(state, 'Sorry, our voice assistant is not available right now. Goodbye.');
-        try { state.ws.close(); } catch { /* ignore */ }
-        return;
-      }
-
       const trimmed = trimSilence(utterancePcm, state.vad.gate, 8000, 200);
       if (trimmed.length < 800) return; // <100ms: noise, not speech
 
       let text = '';
       try {
-        text = await groqTranscribe({ apiKey: key, audioBuffer: buildWav(trimmed, 8000), filename: 'utterance.wav' });
+        text = await transcribe({ apiKey: key, audioBuffer: buildWav(trimmed, 8000), filename: 'utterance.wav' });
       } catch (err) {
         logErr('STT failed:', err.message);
         return;
@@ -488,14 +579,14 @@ export function createTelephony() {
 
       let reply = FALLBACK_REPLY;
       try {
-        const turn = await generateTurn({
+        const t = await turn({
           message: text.trim(),
           history: state.transcript.slice(0, -1),
           productKey: state.productKey,
           language: 'English',
           apiKey: null
         });
-        reply = turn.reply;
+        reply = t.reply;
       } catch (err) {
         logErr('turn generation failed:', err.message);
       }
@@ -520,7 +611,7 @@ export function createTelephony() {
     const key = serverApiKey();
     let chunks;
     try {
-      const wav = await groqTts({ apiKey: key, text });
+      const wav = await tts({ apiKey: key, text });
       const { pcm, sampleRate } = parseWav(wav);
       const pcm8k = resampleLinear(pcm, sampleRate, 8000);
       chunks = to8kMulawChunks(pcm8k, 8000, CHUNK_SAMPLES);
@@ -530,7 +621,6 @@ export function createTelephony() {
     }
     if (!chunks.length) return;
 
-    state.pendingTtsBuffer = wav; // most recent bot audio, kept for future recording upload
     state.playing = true;
     state.vad.reset();
     state.lookback = [];
@@ -538,28 +628,34 @@ export function createTelephony() {
     sendJson(state.ws, { event: 'clear' }); // drop stale caller audio before talking
 
     await new Promise((resolve) => {
+      // The resolver is kept on the state so an interrupting caller (or a closed
+      // socket) can settle it: otherwise the speak chain stays pending forever
+      // and the agent can never speak again after a barge-in.
+      state.playResolve = resolve;
       let i = 0;
       state.playTimer = setInterval(() => {
-        try {
-          if (state.ws.readyState !== 1) { clearInterval(state.playTimer); state.playTimer = null; resolve(); return; }
-          if (i >= chunks.length) {
-            clearInterval(state.playTimer);
-            state.playTimer = null;
-            state.playing = false;
-            sendMark(state, 'speak-end');
-            resolve();
-            return;
-          }
-          sendJson(state.ws, { event: 'media', media: { chunk: chunks[i].toString('base64') } });
-          i++;
-        } catch (err) {
-          clearInterval(state.playTimer);
-          state.playTimer = null;
-          state.playing = false;
-          resolve();
+        if (state.ws.readyState !== 1 || i >= chunks.length) {
+          const finished = i >= chunks.length && state.ws.readyState === 1;
+          haltPlayback(state);
+          if (finished) sendMark(state, 'speak-end');
+          return;
         }
+        sendJson(state.ws, { event: 'media', media: { chunk: chunks[i].toString('base64') } });
+        i++;
       }, 20);
     });
+  }
+
+  // Stop the outbound audio pump. Never emits speak-end: playback was cut short.
+  function haltPlayback(state) {
+    if (state.playTimer) {
+      clearInterval(state.playTimer);
+      state.playTimer = null;
+    }
+    state.playing = false;
+    const resolve = state.playResolve;
+    state.playResolve = null;
+    if (resolve) resolve();
   }
 
   let markCounter = 0;
@@ -580,42 +676,11 @@ export function createTelephony() {
     return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   }
 
-  async function finalizeSession(state, reason) {
-    if (state.finalized) return;
-    state.finalized = true;
-    if (state.transcript.length <= 1) {
-      log(`call ${state.callSid || '(none)'} ended (${reason}) with no real conversation — not persisted`);
-      return;
-    }
-    try {
-      const duration = Math.floor((Date.now() - state.startedAt) / 1000);
-      const product = resolveProduct(state.productKey, null);
-      const productName = product && product.name ? product.name : 'DevPulse AI';
-      const summary = await generateConversationSummary({
-        transcript: state.transcript,
-        product: productName,
-        apiKey: serverApiKey()
-      });
-      const saved = db.saveCall({
-        id: `call-phone-${Date.now()}`,
-        channel: 'phone',
-        customerName: state.customerName || 'Phone prospect',
-        company: '—',
-        from: state.from,
-        to: state.to,
-        language: 'English',
-        product: productName,
-        duration,
-        status: summary.status,
-        transcript: state.transcript,
-        summary,
-        recordingUrl: null
-      });
-      log(`call ${state.callSid} persisted (${reason}) id=${saved.id} status=${summary.status} turns=${state.transcript.length}`);
-    } catch (err) {
-      logErr('failed to persist call:', err);
-    }
-  }
-
-  return { router, attachWebSocket, twilioConfigured };
+  const { accountSid, authToken } = twilioConfig();
+  return {
+    router,
+    attachWebSocket,
+    twilioConfigured: Boolean(accountSid && authToken),
+    lifecycle
+  };
 }

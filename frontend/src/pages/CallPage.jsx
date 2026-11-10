@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import {
-  Phone, PhoneOff, Mic, MicOff, Globe, Bot, User, Loader2, ShieldCheck, Download
+  Phone, PhoneCall, PhoneOff, Mic, MicOff, Globe, Bot, User, Loader2, ShieldCheck, Download
 } from 'lucide-react';
 import { useApp } from '../components/AppShell.jsx';
 import useCallSession from '../hooks/useCallSession.js';
@@ -63,6 +64,23 @@ export default function CallPage() {
 
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6">
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <div className="mr-auto">
+          <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
+            Demo Call — browser voice
+            <Badge variant="indigo">Demo mode</Badge>
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Runs on your browser microphone and Web Speech API. No phone number is involved.
+          </p>
+        </div>
+        <Link to="/phone">
+          <Button variant="outline" size="sm">
+            <PhoneCall className="w-3.5 h-3.5" /> Call a real phone number
+          </Button>
+        </Link>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left column */}
         <div className="lg:col-span-5 space-y-4">

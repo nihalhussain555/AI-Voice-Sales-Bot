@@ -42,3 +42,28 @@ export function Badge({ className, variant = 'default', ...props }) {
 export function StatusBadge({ status, className }) {
   return <Badge variant={STATUS_COLORS[status] || 'default'} className={className}>{status}</Badge>;
 }
+
+// Phone call attempt results (busy, no-answer, canceled, …) — a different
+// vocabulary from the sales statuses above, so it gets its own mapping.
+const OUTCOME_COLORS = {
+  completed: 'emerald',
+  active: 'emerald',
+  ringing: 'amber',
+  queued: 'indigo',
+  busy: 'amber',
+  'no-answer': 'amber',
+  canceled: 'slate',
+  rejected: 'rose',
+  'not-callable': 'rose',
+  failed: 'rose',
+  unknown: 'slate'
+};
+
+export function OutcomeBadge({ outcome, label, className }) {
+  if (!outcome) return null;
+  return (
+    <Badge variant={OUTCOME_COLORS[outcome] || 'default'} className={className}>
+      {label || String(outcome).replace(/-/g, ' ')}
+    </Badge>
+  );
+}
