@@ -1,0 +1,51 @@
+[
+  {
+    "id": "lead-1794233462067",
+    "callId": "call-1794233462038",
+    "name": "Prospective Customer",
+    "company": "High-Growth Enterprise",
+    "email": "",
+    "phone": "",
+    "product": "DevPulse AI",
+    "intent": "cold",
+    "objections": [],
+    "notes": "Log call attempt and queue for automated follow-up callback",
+    "pipelineStatus": "New",
+    "createdAt": "2026-11-09T14:11:02.067Z",
+    "updatedAt": "2026-11-09T14:11:02.067Z"
+  },
+  {
+    "id": "lead-1794233436059",
+    "callId": "call-1794233436025",
+    "name": "Prospective Customer",
+    "company": "High-Growth Enterprise",
+    "email": "",
+    "phone": "",
+    "product": "DevPulse AI",
+    "intent": "warm",
+    "objections": [
+      "Pricing & budget considerations (addressed with ROI metrics & 14-day free trial)"
+    ],
+    "notes": "Share 14-day risk-free trial activation link · Provide relevant customer success case studies",
+    "pipelineStatus": "New",
+    "createdAt": "2026-11-09T14:10:36.058Z",
+    "updatedAt": "2026-11-09T14:10:36.058Z"
+  },
+  {
+    "id": "lead-1794222755834",
+    "callId": "call-demo-001",
+    "name": "Alex Rivera",
+    "company": "ScaleGrid Inc.",
+    "email": "",
+    "phone": "",
+    "product": "DevPulse AI",
+    "intent": "hot",
+    "objections": [
+      "Setup complexity and effort required from their busy engineering team (handled by explaining the 15-minute read-only Helm chart)"
+    ],
+    "notes": "Send calendar invite for Thursday at 2:00 PM EST with Principal Solutions Architect · Email pre-demo Kubernetes sizing checklist and ROI calculator",
+    "pipelineStatus": "New",
+    "createdAt": "2026-11-09T11:12:35.834Z",
+    "updatedAt": "2026-11-09T13:49:39.082Z"
+  }
+]

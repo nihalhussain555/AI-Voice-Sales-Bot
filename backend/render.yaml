@@ -1,0 +1,41 @@
+# Render blueprint for the API only (the SPA deploys to Vercel/Netlify).
+# Deploy from the repository root; Render reads this file and builds backend/.
+services:
+  - type: web
+    name: voicepitch-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GROQ_API_KEY
+        sync: false # set in the Render dashboard — never commit secrets
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: MAX_CALL_MINUTES
+        value: "15"
+      # Must match the public URL Render assigns, or Twilio webhooks can't
+      # reach /api/twilio/voice. After the first deploy, copy the URL here.
+      - key: PUBLIC_BASE_URL
+        sync: false
+      # Allow the deployed SPA to call the API.
+      - key: CORS_ORIGIN
+        sync: false
+
+# Call history and recordings live in src/data and src/recordings. Render's
+# free filesystem is wiped on every deploy/restart, so attach a persistent disk
+# (paid) and mount it, then point both folders at it:
+#   - key: DATA_DIR
+#     value: /var/tmp/voicepitch/data
+#   - key: RECORDINGS_DIR
+#     value: /var/tmp/voicepitch/recordings
+# See README "Deployment" for the no-disk options.

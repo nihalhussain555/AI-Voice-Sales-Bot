@@ -1,0 +1,14 @@
+# This file is the Netlify config when the site's base directory is `frontend/`
+# (Site settings → Build & deployment → Base directory: frontend).
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# React Router owns client-side routes; every path must boot the SPA.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
