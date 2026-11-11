@@ -6,23 +6,7 @@
 //  - Trailing-silence debounce so multi-utterance answers aren't chopped into turns.
 //  - Error callback surfaced to the UI instead of console-only warnings.
 
-const LANGUAGE_CONFIG = {
-  'English': {
-    code: 'en-US',
-    speechRecognitionLang: 'en-US',
-    voiceHints: ['Google US English', 'Microsoft Zira', 'Samantha', 'en-US', 'en_US', 'English']
-  },
-  'Hindi': {
-    code: 'hi-IN',
-    speechRecognitionLang: 'hi-IN',
-    voiceHints: ['Google हिन्दी', 'Microsoft Hemant', 'Microsoft Kalpana', 'hi-IN', 'hi_IN', 'Hindi']
-  },
-  'Telugu': {
-    code: 'te-IN',
-    speechRecognitionLang: 'te-IN',
-    voiceHints: ['Google తెలుగు', 'Microsoft Mohan', 'te-IN', 'te_IN', 'Telugu']
-  }
-};
+import { LANGUAGE_CONFIG } from '../lib/languages.js';
 
 const RESTART_DELAY_MS = 250;       // dodge the "start() called twice" race
 const FINAL_DEBOUNCE_MS = 450;      // wait for the speaker to finish the thought

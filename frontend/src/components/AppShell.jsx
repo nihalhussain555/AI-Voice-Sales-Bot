@@ -1,119 +1,184 @@
-import React, { useMemo, useState } from 'react';
-import { NavLink, Outlet, useOutletContext } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { NavLink, Outlet, useLocation, useOutletContext } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Bot, Phone, PhoneCall, History, BarChart3, Users, Settings, Layers, KeyRound
-} from 'lucide-react';
+import { Bot, X } from 'lucide-react';
+
 import { api } from '../services/api.js';
 import { cn } from '../lib/cn.js';
-import { Badge } from '../components/ui/badge.jsx';
-import ProductPicker from '../components/ProductPicker.jsx';
-
-const NAV = [
-  { to: '/call', label: 'Demo Call', icon: Phone },
-  { to: '/phone', label: 'Phone Call', icon: PhoneCall },
-  { to: '/history', label: 'Call History', icon: History },
-  { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/leads', label: 'Leads CRM', icon: Users },
-  { to: '/settings', label: 'Settings', icon: Settings }
-];
+import { buildNotifications, markRead, readIds, NOTIFICATIONS_EVENT } from '../lib/notifications.js';
+import {
+  getProfile, getSidebarCollapsed, getCustomProducts, setSidebarCollapsed,
+  SIDEBAR_EVENT, CUSTOM_PRODUCTS_EVENT, PROFILE_EVENT
+} from '../lib/profile.js';
+import ProductPicker from './ProductPicker.jsx';
+import Sidebar, { NavList } from './shell/Sidebar.jsx';
+import Topbar from './shell/Topbar.jsx';
 
 export function useApp() {
   return useOutletContext();
 }
 
 export default function AppShell() {
+  const location = useLocation();
+  const [collapsed, setCollapsed] = useState(getSidebarCollapsed);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [productKey, setProductKey] = useState(() => localStorage.getItem('vp_product') || 'devpulse');
+  const [seen, setSeen] = useState(readIds);
+  const [profile, setProfile] = useState(getProfile);
 
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 30000 });
   const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: api.products });
+  // Same cache keys the pages use — the bell and the global search read the
+  // records the app already loads instead of hitting the API again.
+  const { data: callsData } = useQuery({ queryKey: ['calls'], queryFn: api.calls, refetchInterval: 60000 });
+  const { data: leadsData } = useQuery({ queryKey: ['leads'], queryFn: api.leads });
 
   const products = productsData?.products || [];
-  const storedCustom = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('vp_custom_products') || '[]'); } catch { return []; }
-  }, [pickerOpen]);
+  const [customTick, setCustomTick] = useState(0);
+  const storedCustom = useMemo(() => getCustomProducts(), [customTick]);
   const allProducts = [...storedCustom, ...products];
   const product = allProducts.find(p => p.id === productKey) || allProducts[0] || null;
+
+  const notifications = useMemo(
+    () => buildNotifications({ calls: callsData?.calls || [], leads: leadsData?.leads || [] }),
+    [callsData, leadsData]
+  );
+  const unread = notifications.filter(item => !seen.has(item.id)).length;
 
   const selectProduct = (p) => {
     setProductKey(p.id);
     localStorage.setItem('vp_product', p.id);
   };
 
+  const toggleCollapsed = () => setSidebarCollapsed(!collapsed);
+
+  const markAllRead = () => markRead(notifications.map(item => item.id));
+
+  useEffect(() => {
+    const sync = () => setSeen(readIds());
+    window.addEventListener(NOTIFICATIONS_EVENT, sync);
+    return () => window.removeEventListener(NOTIFICATIONS_EVENT, sync);
+  }, []);
+
+  useEffect(() => {
+    const onSidebar = (event) => setCollapsed(event.detail);
+    const onCustomProducts = () => setCustomTick(tick => tick + 1);
+    const onProfile = () => setProfile(getProfile());
+    window.addEventListener(SIDEBAR_EVENT, onSidebar);
+    window.addEventListener(CUSTOM_PRODUCTS_EVENT, onCustomProducts);
+    window.addEventListener(PROFILE_EVENT, onProfile);
+    return () => {
+      window.removeEventListener(SIDEBAR_EVENT, onSidebar);
+      window.removeEventListener(CUSTOM_PRODUCTS_EVENT, onCustomProducts);
+      window.removeEventListener(PROFILE_EVENT, onProfile);
+    };
+  }, []);
+
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    // The drawer is a modal dialog, so it dismisses on Escape like every other
+    // overlay in this console.
+    const onKey = (event) => { if (event.key === 'Escape') setDrawerOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [drawerOpen]);
+
+  const outletContext = { product, products: allProducts, selectProduct, openProductPicker: () => setPickerOpen(true), health };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex selection:bg-indigo-500 selection:text-white">
-      {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 w-60 hidden lg:flex flex-col border-r border-slate-800/80 bg-slate-950/90 backdrop-blur-md z-40">
-        <div className="flex items-center gap-3 px-5 h-16 border-b border-slate-800/60">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-            <Bot className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <div className="font-extrabold text-sm tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">VoicePitch AI</div>
-            <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Autonomous Sales AE</div>
+    <div className="min-h-screen bg-canvas text-ink">
+      <Sidebar
+        collapsed={collapsed}
+        onToggleCollapse={toggleCollapsed}
+        health={health}
+        product={product}
+        onOpenProduct={() => setPickerOpen(true)}
+      />
+
+      {/* Mobile drawer — the desktop rail is hidden here, so the list still only
+          renders in one place at a time. */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+          <div className="absolute inset-0 bg-[rgb(var(--scrim))]" onClick={() => setDrawerOpen(false)} />
+          <div className="absolute inset-y-0 left-0 flex w-[min(19rem,86vw)] flex-col border-r border-line bg-surface shadow-lifted animate-slide-in">
+            <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-line px-4">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-violet flex items-center justify-center shadow-glow">
+                <Bot className="w-[18px] h-[18px] text-white" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-extrabold tracking-tight text-ink">VoicePitch AI</div>
+                <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-ink-muted">Autonomous sales AE</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                aria-label="Close navigation"
+                className="rounded-field p-1.5 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <NavList onNavigate={() => setDrawerOpen(false)} />
+            <div className="shrink-0 border-t border-line px-3 py-3">
+              <button
+                type="button"
+                onClick={() => { setDrawerOpen(false); setPickerOpen(true); }}
+                className="flex w-full items-center gap-2.5 rounded-field border border-line bg-surface-2/60 px-3 py-2 text-left transition-colors hover:border-line-strong"
+              >
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted">Pitching</span>
+                <span className="truncate text-[11px] font-semibold text-ink">{product?.name || 'Select product'}</span>
+              </button>
+            </div>
           </div>
         </div>
+      )}
 
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) => cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors',
-                isActive ? 'bg-indigo-600/90 text-white shadow-md shadow-indigo-600/20' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
+      <div className={cn('flex min-h-screen flex-col transition-[padding] duration-200 ease-spring', collapsed ? 'lg:pl-[72px]' : 'lg:pl-64')}>
+        <Topbar
+          products={allProducts}
+          product={product}
+          notifications={notifications}
+          unread={unread}
+          onMarkAllRead={markAllRead}
+          profile={profile}
+          onOpenMobileNav={() => setDrawerOpen(true)}
+        />
 
-        <div className="px-4 py-4 border-t border-slate-800/60 space-y-2">
-          <button
-            onClick={() => setPickerOpen(true)}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border border-slate-800 hover:bg-slate-900 transition text-left"
-          >
-            <Layers className="w-4 h-4 text-indigo-400 shrink-0" />
-            <span className="text-[11px] font-semibold text-slate-300 truncate">{product?.name || 'Select product'}</span>
-          </button>
-          <div className="flex items-center gap-2 px-1">
-            <KeyRound className={cn('w-3.5 h-3.5', health?.groqKeyConfigured ? 'text-emerald-400' : 'text-amber-400')} />
-            <span className="text-[10px] text-slate-500 font-medium">
-              {health == null ? 'Server offline' : health.groqKeyConfigured ? 'Groq connected' : 'Demo engine mode'}
-            </span>
+        <main className="flex-1">
+          <div key={location.pathname} className="animate-fade-in">
+            <Outlet context={outletContext} />
           </div>
-        </div>
-      </aside>
+        </main>
 
-      {/* Mobile top nav */}
-      <div className="lg:hidden fixed top-0 inset-x-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/60">
-        <div className="flex items-center gap-2 px-3 h-14 overflow-x-auto no-scrollbar">
-          <Bot className="w-5 h-5 text-indigo-400 shrink-0" />
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) => cn(
-                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold whitespace-nowrap transition',
-                isActive ? 'bg-indigo-600 text-white' : 'text-slate-400'
-              )}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-            </NavLink>
-          ))}
-        </div>
+        <footer className="border-t border-line px-4 py-4 sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-[1440px] flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted">
+            <span className="font-semibold">VoicePitch AI</span>
+            <span aria-hidden="true">·</span>
+            <span>v{health?.version || '2.1.0'}</span>
+            <span aria-hidden="true">·</span>
+            <NavLink to="/help" className="font-semibold text-primary-hover hover:underline">Help &amp; support</NavLink>
+            <span className="ml-auto">{health ? 'Backend reachable' : 'Waiting for backend'}</span>
+          </div>
+        </footer>
       </div>
 
-      {/* Main */}
-      <main className="flex-1 lg:ml-60 pt-16 lg:pt-0 min-h-screen">
-        <Outlet context={{ product, selectProduct, openProductPicker: () => setPickerOpen(true), health }} />
-      </main>
-
-      <ProductPicker open={pickerOpen} onClose={() => setPickerOpen(false)} products={allProducts} active={product} onSelect={selectProduct} />
+      <ProductPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        products={allProducts}
+        active={product}
+        onSelect={selectProduct}
+      />
     </div>
   );
 }

@@ -1,1 +1,435 @@
-[]
+[
+  {
+    "id": "seed-call-10",
+    "timestamp": "2026-10-17T11:21:28.100Z",
+    "channel": "phone",
+    "direction": "outbound",
+    "to": "+14155550166",
+    "from": "+14150000000",
+    "customerName": "Ivy Chen",
+    "company": "Northwind Retail",
+    "product": "CrewSync",
+    "language": "English",
+    "duration": 0,
+    "status": "No Response",
+    "outcome": "failed",
+    "callSid": "CAseed0010",
+    "twilioErrorCode": 21610,
+    "transcript": [],
+    "summary": {
+      "status": "No Response",
+      "overview": "Number opted out of calls.",
+      "requirements": [],
+      "objections": [],
+      "nextSteps": [
+        "Supress number"
+      ],
+      "sentiment": "Neutral",
+      "dealScore": 5
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-9",
+    "timestamp": "2026-10-24T13:21:28.100Z",
+    "channel": "phone",
+    "direction": "outbound",
+    "to": "+14155550144",
+    "from": "+14150000000",
+    "customerName": "Rahul Verma",
+    "company": "Kirana Digital",
+    "product": "DevPulse AI",
+    "language": "Telugu",
+    "duration": 188,
+    "status": "Interested",
+    "outcome": "completed",
+    "callSid": "CAseed0009",
+    "transcript": [
+      {
+        "sender": "bot",
+        "text": "Namaste Rahul, calling about developer productivity for Kirana.",
+        "time": "00:03"
+      },
+      {
+        "sender": "customer",
+        "text": "Interesting, but our team is small.",
+        "time": "00:11"
+      },
+      {
+        "sender": "bot",
+        "text": "Happy to walk you through a live demo — would Thursday work?",
+        "time": "00:19"
+      },
+      {
+        "sender": "customer",
+        "text": "Thursday is fine, send me the details.",
+        "time": "00:27"
+      }
+    ],
+    "summary": {
+      "status": "Interested",
+      "overview": "Warm on the product, unsure about team size.",
+      "requirements": [
+        "5 seats"
+      ],
+      "objections": [
+        "Small team"
+      ],
+      "nextSteps": [
+        "Share starter plan"
+      ],
+      "sentiment": "Positive",
+      "dealScore": 66
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-8",
+    "timestamp": "2026-10-30T19:21:28.100Z",
+    "channel": "browser",
+    "direction": null,
+    "customerName": "Prospective Customer",
+    "company": "High-Growth Enterprise",
+    "product": "Ledgerly",
+    "language": "English",
+    "duration": 141,
+    "status": "Follow-up Required",
+    "outcome": null,
+    "callSid": null,
+    "transcript": [
+      {
+        "sender": "bot",
+        "text": "Thanks for connecting! Are you exploring close automation?",
+        "time": "00:03"
+      },
+      {
+        "sender": "customer",
+        "text": "Maybe, send pricing.",
+        "time": "00:11"
+      },
+      {
+        "sender": "bot",
+        "text": "Happy to walk you through a live demo — would Thursday work?",
+        "time": "00:19"
+      },
+      {
+        "sender": "customer",
+        "text": "Thursday is fine, send me the details.",
+        "time": "00:27"
+      }
+    ],
+    "summary": {
+      "status": "Follow-up Required",
+      "overview": "Needs pricing before deciding.",
+      "requirements": [
+        "Invoice export"
+      ],
+      "objections": [],
+      "nextSteps": [
+        "Email pricing tiers"
+      ],
+      "sentiment": "Neutral",
+      "dealScore": 52
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-7",
+    "timestamp": "2026-11-03T13:21:28.100Z",
+    "channel": "phone",
+    "direction": "outbound",
+    "to": "+14155550199",
+    "from": "+14150000000",
+    "customerName": "Tomás Herrera",
+    "company": "Solace Travel",
+    "product": "CrewSync",
+    "language": "English",
+    "duration": 0,
+    "status": "No Response",
+    "outcome": "rejected",
+    "callSid": "CAseed0007",
+    "transcript": [],
+    "summary": {
+      "status": "No Response",
+      "overview": "Call rejected by the recipient.",
+      "requirements": [],
+      "objections": [],
+      "nextSteps": [
+        "Switch to email"
+      ],
+      "sentiment": "Neutral",
+      "dealScore": 10
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-6",
+    "timestamp": "2026-11-05T15:21:28.100Z",
+    "channel": "browser",
+    "direction": null,
+    "customerName": "Prospective Customer",
+    "company": "High-Growth Enterprise",
+    "product": "CrewSync",
+    "language": "Hindi",
+    "duration": 68,
+    "status": "Not Interested",
+    "outcome": null,
+    "callSid": null,
+    "transcript": [
+      {
+        "sender": "bot",
+        "text": "Hello! Thanks for taking my call.",
+        "time": "00:03"
+      },
+      {
+        "sender": "customer",
+        "text": "We just signed with someone else.",
+        "time": "00:11"
+      },
+      {
+        "sender": "bot",
+        "text": "Happy to walk you through a live demo — would Thursday work?",
+        "time": "00:19"
+      },
+      {
+        "sender": "customer",
+        "text": "Thursday is fine, send me the details.",
+        "time": "00:27"
+      }
+    ],
+    "summary": {
+      "status": "Not Interested",
+      "overview": "Already committed to a competitor.",
+      "requirements": [],
+      "objections": [
+        "Existing contract"
+      ],
+      "nextSteps": [
+        "Revisit in 9 months"
+      ],
+      "sentiment": "Negative",
+      "dealScore": 28
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-5",
+    "timestamp": "2026-11-08T13:21:28.100Z",
+    "channel": "phone",
+    "direction": "inbound",
+    "from": "+441234567890",
+    "to": "+14150000000",
+    "customerName": "Aisha Khan",
+    "company": "Beacon Media",
+    "product": "Ledgerly",
+    "language": "English",
+    "duration": 122,
+    "status": "Interested",
+    "outcome": "completed",
+    "callSid": "CAseed0005",
+    "transcript": [
+      {
+        "sender": "bot",
+        "text": "You reached Beacon Finance assistant — how can I help?",
+        "time": "00:03"
+      },
+      {
+        "sender": "customer",
+        "text": "I heard about your reconciliation tool.",
+        "time": "00:11"
+      },
+      {
+        "sender": "bot",
+        "text": "Happy to walk you through a live demo — would Thursday work?",
+        "time": "00:19"
+      },
+      {
+        "sender": "customer",
+        "text": "Thursday is fine, send me the details.",
+        "time": "00:27"
+      }
+    ],
+    "summary": {
+      "status": "Interested",
+      "overview": "Inbound enquiry, comparing two vendors.",
+      "requirements": [
+        "Multi-currency"
+      ],
+      "objections": [
+        "Migration effort"
+      ],
+      "nextSteps": [
+        "Send comparison sheet"
+      ],
+      "sentiment": "Positive",
+      "dealScore": 61
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-4",
+    "timestamp": "2026-11-10T05:21:28.100Z",
+    "channel": "browser",
+    "direction": null,
+    "customerName": "Prospective Customer",
+    "company": "High-Growth Enterprise",
+    "product": "DevPulse AI",
+    "language": "English",
+    "duration": 176,
+    "status": "Demo Requested",
+    "outcome": null,
+    "callSid": null,
+    "transcript": [
+      {
+        "sender": "bot",
+        "text": "Thanks for connecting! Are you currently exploring ways to upgrade your workflows?",
+        "time": "00:03"
+      },
+      {
+        "sender": "customer",
+        "text": "Yes, our release notes are a mess.",
+        "time": "00:11"
+      },
+      {
+        "sender": "bot",
+        "text": "Happy to walk you through a live demo — would Thursday work?",
+        "time": "00:19"
+      },
+      {
+        "sender": "customer",
+        "text": "Thursday is fine, send me the details.",
+        "time": "00:27"
+      }
+    ],
+    "summary": {
+      "status": "Demo Requested",
+      "overview": "Wants a demo for the platform team.",
+      "requirements": [
+        "Jira integration"
+      ],
+      "objections": [
+        "Prior tool was slow"
+      ],
+      "nextSteps": [
+        "Schedule demo"
+      ],
+      "sentiment": "Positive",
+      "dealScore": 74
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-3",
+    "timestamp": "2026-11-10T09:21:28.100Z",
+    "channel": "phone",
+    "direction": "outbound",
+    "to": "+14155550133",
+    "from": "+14150000000",
+    "customerName": "Dana Whitfield",
+    "company": "Orbit Health",
+    "product": "Ledgerly",
+    "language": "English",
+    "duration": 0,
+    "status": "No Response",
+    "outcome": "busy",
+    "callSid": "CAseed0003",
+    "transcript": [],
+    "summary": {
+      "status": "No Response",
+      "overview": "Line busy during the outreach window.",
+      "requirements": [],
+      "objections": [],
+      "nextSteps": [
+        "Try the afternoons"
+      ],
+      "sentiment": "Neutral",
+      "dealScore": 15
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-2",
+    "timestamp": "2026-11-11T06:21:28.100Z",
+    "channel": "phone",
+    "direction": "outbound",
+    "to": "+14155550177",
+    "from": "+14150000000",
+    "customerName": "Marco Silva",
+    "company": "Vela Logistics",
+    "product": "DevPulse AI",
+    "language": "English",
+    "duration": 0,
+    "status": "No Response",
+    "outcome": "no-answer",
+    "callSid": "CAseed0002",
+    "transcript": [],
+    "summary": {
+      "status": "No Response",
+      "overview": "No answer on the first attempt.",
+      "requirements": [],
+      "objections": [],
+      "nextSteps": [
+        "Retry tomorrow morning"
+      ],
+      "sentiment": "Neutral",
+      "dealScore": 20
+    },
+    "recordingUrl": null
+  },
+  {
+    "id": "seed-call-1",
+    "timestamp": "2026-11-11T09:21:28.100Z",
+    "channel": "phone",
+    "direction": "outbound",
+    "to": "+14155550111",
+    "from": "+14150000000",
+    "customerName": "Priya Nair",
+    "company": "Northwind Retail",
+    "product": "DevPulse AI",
+    "language": "English",
+    "duration": 214,
+    "status": "Converted",
+    "outcome": "completed",
+    "callSid": "CAseed0001",
+    "transcript": [
+      {
+        "sender": "bot",
+        "text": "Thanks for picking up, Priya. I am calling about the engineering dashboards you requested.",
+        "time": "00:03"
+      },
+      {
+        "sender": "customer",
+        "text": "We are evaluating tools right now, pricing?",
+        "time": "00:11"
+      },
+      {
+        "sender": "bot",
+        "text": "Happy to walk you through a live demo — would Thursday work?",
+        "time": "00:19"
+      },
+      {
+        "sender": "customer",
+        "text": "Thursday is fine, send me the details.",
+        "time": "00:27"
+      }
+    ],
+    "summary": {
+      "status": "Converted",
+      "overview": "Priya agreed to a 40-seat order pending security review.",
+      "requirements": [
+        "SSO",
+        "40 seats"
+      ],
+      "objections": [
+        "Budget cycle ends in December"
+      ],
+      "nextSteps": [
+        "Send MSA today",
+        "Book onboarding for Monday"
+      ],
+      "sentiment": "Positive",
+      "dealScore": 88
+    },
+    "recordingUrl": null
+  }
+]

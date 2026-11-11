@@ -2,43 +2,143 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens ─────────────────────────────────────────────────────────
+   Channels only (no rgb() wrapper) so Tailwind can apply alpha: bg-surface/70.
+   Dark is the default; light is opt-in through <html data-theme="light">.
+   ──────────────────────────────────────────────────────────────────────── */
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --canvas: 7 11 20;          /* page background — deep navy black   */
+  --canvas-deep: 4 7 14;      /* behind canvas, for gradients        */
+  --surface: 15 23 38;        /* cards                               */
+  --surface-2: 22 32 51;      /* raised cards, inputs, insets        */
+  --surface-3: 11 17 28;      /* wells, code blocks, table headers   */
+  --line: 36 49 74;           /* hairline borders                    */
+  --line-strong: 56 72 104;   /* borders that need to read clearly    */
+  --ink: 233 238 246;         /* primary text                        */
+  --ink-soft: 168 181 203;    /* secondary text                      */
+  --ink-muted: 108 124 152;   /* labels, meta, placeholders          */
+
+  --primary: 99 102 241;
+  --primary-hover: 129 140 248;
+  --primary-ink: 255 255 255;
+  --violet: 167 139 250;
+  --electric: 56 189 248;
+  --success: 52 211 153;
+  --warn: 251 191 36;
+  --danger: 251 113 133;
+  --info: 56 189 248;
+  --focus: 129 140 248;
+
+  --shadow-1: 0 0 0 / 0.3;
+  --shadow-2: 2 6 16 / 0.55;
+  --highlight: 255 255 255;
+  --scrim: 3 6 12;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --canvas: 246 248 252;
+  --canvas-deep: 237 241 249;
+  --surface: 255 255 255;
+  --surface-2: 250 251 254;
+  --surface-3: 241 245 250;
+  --line: 224 230 240;
+  --line-strong: 200 210 225;
+  --ink: 12 20 36;
+  --ink-soft: 47 62 88;
+  --ink-muted: 108 122 145;
+
+  --primary: 79 70 229;
+  --primary-hover: 67 56 202;
+  --primary-ink: 255 255 255;
+  --violet: 124 58 237;
+  --electric: 2 132 199;
+  --success: 5 150 105;
+  --warn: 180 83 9;
+  --danger: 225 29 72;
+  --info: 2 132 199;
+  --focus: 79 70 229;
+
+  --shadow-1: 15 23 42 / 0.05;
+  --shadow-2: 15 23 42 / 0.12;
+  --highlight: 255 255 255;
+  --scrim: 15 23 42;
+}
+
 @layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
-    @apply bg-slate-950 text-slate-100 antialiased;
+    @apply bg-canvas text-ink antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Only the paint-level properties transition, so a theme switch reads as a
+     cross-fade without leaking motion into layout or hover animations. */
+  body,
+  [data-theme-surface] {
+    transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+  }
+
+  ::selection {
+    background: rgb(var(--primary) / 0.32);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--focus));
+    outline-offset: 2px;
   }
 }
 
 /* Custom scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
+  background: rgb(var(--line-strong) / 0.55);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.6);
+  background: rgb(var(--line-strong) / 0.9);
 }
 
-/* Glowing animations */
-.glow-primary {
-  box-shadow: 0 0 25px -5px rgba(99, 102, 241, 0.4);
+/* Frosted panel used for the top bar and a few hero cards only — deliberately
+   scarce, since glassmorphism on every card reads as noise. */
+.glass {
+  background: rgb(var(--surface) / 0.72);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
 }
 
-.glow-emerald {
-  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.4);
+/* Hairline top highlight that makes a card read as raised rather than pasted. */
+.edge-light {
+  box-shadow: inset 0 1px 0 rgb(var(--highlight) / 0.05);
 }
 
-.glow-rose {
-  box-shadow: 0 0 25px -5px rgba(244, 63, 94, 0.4);
+/* Radial brand wash for the voice agent stage. */
+.aurora {
+  background:
+    radial-gradient(60% 55% at 20% 0%, rgb(var(--primary) / 0.16) 0%, transparent 60%),
+    radial-gradient(55% 50% at 85% 10%, rgb(var(--electric) / 0.12) 0%, transparent 62%);
 }
 
-/* fadeIn utility used across chat + history (was referenced but never defined) */
+/* Dotted texture for empty states */
+.dot-grid {
+  background-image: radial-gradient(rgb(var(--line-strong) / 0.4) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* fadeIn is referenced by chat + history transcripts */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -54,4 +154,14 @@
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

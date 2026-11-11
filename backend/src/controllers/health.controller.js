@@ -10,6 +10,12 @@ export function health(req, res) {
     ok: true,
     provider: 'groq',
     chatModel: GROQ_CHAT_MODEL,
+    // Model names only — never the key, which stays in the server environment.
+    voice: {
+      sttModel: groqConfig.sttModel,
+      ttsModel: groqConfig.ttsModel,
+      ttsVoice: groqConfig.ttsVoice
+    },
     groqKeyConfigured: Boolean(groqConfig.apiKey()),
     twilioConfigured: ready.inboundReady,
     publicBaseUrl: ready.publicBaseUrl,

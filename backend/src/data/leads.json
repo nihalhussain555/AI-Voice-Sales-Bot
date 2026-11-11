@@ -1,1 +1,68 @@
-[]
+[
+  {
+    "id": "lead-1794396088318",
+    "callId": null,
+    "name": "Marco Silva",
+    "company": "Vela Logistics",
+    "email": "marco@vela.example",
+    "phone": "+14155550177",
+    "product": "DevPulse AI",
+    "intent": "unknown",
+    "objections": [],
+    "notes": "Not reached yet",
+    "pipelineStatus": "New",
+    "createdAt": "2026-11-11T11:21:28.318Z",
+    "updatedAt": "2026-11-11T11:21:28.318Z"
+  },
+  {
+    "id": "lead-1794396088313",
+    "callId": null,
+    "name": "Aisha Khan",
+    "company": "Beacon Media",
+    "email": "aisha@beacon.example",
+    "phone": "+441234567890",
+    "product": "Ledgerly",
+    "intent": "warm",
+    "objections": [
+      "Migration effort"
+    ],
+    "notes": "Comparing two vendors",
+    "pipelineStatus": "Contacted",
+    "createdAt": "2026-11-11T11:21:28.313Z",
+    "updatedAt": "2026-11-11T11:21:28.313Z"
+  },
+  {
+    "id": "lead-1794396088305",
+    "callId": null,
+    "name": "Rahul Verma",
+    "company": "Kirana Digital",
+    "email": "rahul@kirana.example",
+    "phone": "+14155550144",
+    "product": "DevPulse AI",
+    "intent": "hot",
+    "objections": [
+      "Small team"
+    ],
+    "notes": "Wants a starter plan",
+    "pipelineStatus": "New",
+    "createdAt": "2026-11-11T11:21:28.305Z",
+    "updatedAt": "2026-11-11T11:21:28.305Z"
+  },
+  {
+    "id": "lead-1794396088297",
+    "callId": null,
+    "name": "Priya Nair",
+    "company": "Northwind Retail",
+    "email": "priya@northwind.example",
+    "phone": "+14155550111",
+    "product": "DevPulse AI",
+    "intent": "hot",
+    "objections": [
+      "Budget cycle"
+    ],
+    "notes": "Security review pending",
+    "pipelineStatus": "Qualified",
+    "createdAt": "2026-11-11T11:21:28.297Z",
+    "updatedAt": "2026-11-11T11:21:28.297Z"
+  }
+]

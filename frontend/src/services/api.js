@@ -33,19 +33,27 @@ async function request(url, options = {}) {
   return data;
 }
 
-export function getStoredKey() {
-  return localStorage.getItem('vp_groq_key') || '';
-}
-
-export function setStoredKey(key) {
-  if (key) localStorage.setItem('vp_groq_key', key);
-  else localStorage.removeItem('vp_groq_key');
-}
+// API keys are never handled here: the backend reads GROQ_API_KEY (and the
+// Twilio credentials) from its own environment, so no secret reaches the bundle.
 
 export const api = {
   health: () => request(apiUrl('/api/health')),
 
   products: () => request(apiUrl('/api/products')),
+
+  // The exact system prompt the server builds for a product — read-only.
+  agentPersona: ({ product, language } = {}) => {
+    if (product?.custom) {
+      return request(apiUrl('/api/agent/persona'), {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ customProduct: product, language })
+      });
+    }
+    const params = new URLSearchParams({ productKey: product?.id || 'devpulse' });
+    if (language) params.set('language', language);
+    return request(apiUrl(`/api/agent/persona?${params}`));
+  },
 
   chat: ({ message, history, product, language }) =>
     request(apiUrl('/api/chat'), {
@@ -56,8 +64,7 @@ export const api = {
         history,
         productKey: product?.id || 'devpulse',
         customProduct: product,
-        language,
-        apiKey: getStoredKey()
+        language
       })
     }),
 
@@ -67,8 +74,7 @@ export const api = {
       headers: JSON_HEADERS,
       body: JSON.stringify({
         transcript,
-        product: product?.name || 'DevPulse AI',
-        apiKey: getStoredKey()
+        product: product?.name || 'DevPulse AI'
       })
     }),
 
@@ -90,6 +96,9 @@ export const api = {
 
   leads: () => request(apiUrl('/api/leads')),
 
+  createLead: (lead) =>
+    request(apiUrl('/api/leads'), { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(lead) }),
+
   updateLead: (id, patch) =>
     request(apiUrl(`/api/leads/${id}`), { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch) }),
 
@@ -99,8 +108,16 @@ export const api = {
     request(apiUrl('/api/leads/extract'), {
       method: 'POST',
       headers: JSON_HEADERS,
-      body: JSON.stringify({ callId, apiKey: getStoredKey() })
+      body: JSON.stringify({ callId })
     }),
+
+  // Bulk CSV import. dryRun=true returns the same counts the real import will
+  // produce, without writing anything.
+  importCustomers: (file, { dryRun = false } = {}) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return request(apiUrl(`/api/leads/import?dryRun=${dryRun ? 1 : 0}`), { method: 'POST', body: form });
+  },
 
   // Real phone calling (Twilio). /api/phone/* is the app-facing side; Twilio
   // itself talks to /api/twilio/* directly.

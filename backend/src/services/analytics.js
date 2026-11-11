@@ -97,6 +97,26 @@ export function buildAnalytics({ days = 30, from = null, to = null, calls = null
     { stage: 'Converted', count: converted }
   ];
 
+  // Customer + conversation roll-ups for the dashboard KPIs. A customer is
+  // identified by their own number first, then email, then name, so the same
+  // person called twice on the phone counts once. Only the customer side of the
+  // leg is used — including our own number would split a contact whenever the
+  // outbound caller ID changes, and would never match a CRM record's phone.
+  const customerKey = (c) => {
+    const number = c.direction === 'inbound' ? c.from : c.to;
+    const digits = String(number || '').replace(/\D/g, '').replace(/^00/, '');
+    if (digits.length >= 7) return `p:${digits}`;
+    const email = String(c.email || '').trim().toLowerCase();
+    if (email) return `e:${email}`;
+    return `n:${String(c.customerName || 'unknown').trim().toLowerCase()}`;
+  };
+  const UNREACHED = ['busy', 'no-answer', 'canceled', 'rejected', 'failed', 'not-callable'];
+  const hasConversation = (c) => (c.transcript || []).length > 0;
+  const successful = scoped.filter(c => hasConversation(c) && (!c.outcome || c.outcome === 'completed')).length;
+  const failed = scoped.filter(c => UNREACHED.includes(c.outcome) || (!hasConversation(c) && c.channel === 'phone')).length;
+  const customers = new Set(scoped.map(customerKey)).size;
+  const conversationTurns = scoped.reduce((n, c) => n + (c.transcript || []).length, 0);
+
   // Lead pipeline snapshot
   const leadPipeline = LEAD_STATUSES.map(s => ({
     status: s,
@@ -114,7 +134,6 @@ export function buildAnalytics({ days = 30, from = null, to = null, calls = null
       dealScore: c.summary.dealScore
     }));
 
-  const UNREACHED = ['busy', 'no-answer', 'canceled', 'rejected', 'failed', 'not-callable'];
   const phoneReach = phoneCalls.filter(c => c.outcome === 'completed').length;
   const phoneStats = {
     attempts: phoneCalls.length,
@@ -132,7 +151,11 @@ export function buildAnalytics({ days = 30, from = null, to = null, calls = null
       conversionRate: totalCalls ? Math.round((converted / totalCalls) * 100) : 0,
       engagementRate: totalCalls ? Math.round((engaged / totalCalls) * 100) : 0,
       avgDuration,
-      avgDealScore
+      avgDealScore,
+      successful,
+      failed,
+      customers,
+      conversationTurns
     },
     phone: phoneStats,
     statusDistribution,

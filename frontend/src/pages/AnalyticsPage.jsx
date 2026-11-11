@@ -1,245 +1,234 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
   BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts';
-import { PhoneCall, TrendingUp, Clock, Target, Users2, Radio } from 'lucide-react';
+import { Target, Funnel, PieChart as PieIcon, TrendingUp, Layers, Trophy, Users2 } from 'lucide-react';
+
 import { api } from '../services/api.js';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card.jsx';
+import { useThemeTokens } from '../context/theme.jsx';
+import { formatDuration } from '../lib/customers.js';
+import Page from '../components/shell/Page.jsx';
+import { PageHeader, SectionHeader } from '../components/ui/page-header.jsx';
+import { Card, CardContent } from '../components/ui/card.jsx';
 import { Badge, StatusBadge } from '../components/ui/badge.jsx';
-import { cn } from '../lib/cn.js';
+import Tabs from '../components/ui/tabs.jsx';
+import { MeterRow } from '../components/ui/progress.jsx';
+import Avatar from '../components/ui/avatar.jsx';
+import ChartTooltip from '../components/charts/ChartTooltip.jsx';
+import { LoadState } from '../components/ui/empty-state.jsx';
 
-const RANGES = [7, 30, 90];
-const STATUS_COLORS = {
-  'Converted': '#10b981',
-  'Demo Requested': '#0ea5e9',
-  'Interested': '#6366f1',
-  'Follow-up Required': '#f59e0b',
-  'Not Interested': '#f43f5e',
-  'No Response': '#64748b'
+const RANGES = [
+  { value: 7, label: '7 days' },
+  { value: 30, label: '30 days' },
+  { value: 90, label: '90 days' }
+];
+
+const STATUS_TOKENS = {
+  'Converted': 'success',
+  'Demo Requested': 'info',
+  'Interested': 'primary',
+  'Follow-up Required': 'warn',
+  'Not Interested': 'danger',
+  'No Response': 'inkMuted'
 };
 
-const tooltipStyle = {
-  contentStyle: { background: '#0f172a', border: '1px solid #334155', borderRadius: 12, fontSize: 12 },
-  labelStyle: { color: '#e2e8f0' },
-  itemStyle: { color: '#cbd5e1' }
-};
+const shortDay = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' });
 
 export default function AnalyticsPage() {
+  const tokens = useThemeTokens();
   const [days, setDays] = useState(30);
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['analytics', days],
     queryFn: () => api.analytics(days)
   });
 
+  const axis = { fontSize: 10, fill: tokens.inkMuted };
+  const statusSlices = (data?.statusDistribution || []).filter(d => d.count > 0);
+
   return (
-    <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-xl font-extrabold text-white mr-auto">Analytics</h2>
-        <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1">
-          {RANGES.map(r => (
-            <button key={r} onClick={() => setDays(r)}
-              className={cn('px-3 py-1.5 rounded-lg text-xs font-bold transition',
-                days === r ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white')}>
-              {r}d
-            </button>
-          ))}
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        description="How the agent performs across every archived conversation: where calls stall, which product converts, and which outcomes the phone line actually produces."
+        meta={data && (
+          <>
+            <Badge variant="slate">{data.totals.totalCalls} calls in window</Badge>
+            <Badge variant="success">{data.totals.converted} converted</Badge>
+            <Badge variant="primary">{formatDuration(data.totals.avgDuration)} average</Badge>
+          </>
+        )}
+        actions={<Tabs items={RANGES} value={days} onChange={setDays} size="sm" ariaLabel="Analytics range" />}
+      />
 
-      {error && <Card><CardContent className="py-6 text-sm text-rose-300">Failed to load analytics: {error.message}</CardContent></Card>}
-      {isLoading && !data && <Card><CardContent className="py-10 text-center text-sm text-slate-500">Loading…</CardContent></Card>}
+      <LoadState isLoading={isLoading} error={error} onRetry={refetch} skeleton="card">
+        {data && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card>
+                <SectionHeader
+                  icon={Funnel}
+                  title="Conversion funnel"
+                  description="Each stage counts calls that reached it in the window."
+                  className="px-5 pt-5"
+                />
+                <CardContent className="pt-0 space-y-3">
+                  {data.funnel.map((f, i) => (
+                    <MeterRow
+                      key={f.stage}
+                      name={f.stage}
+                      value={f.count}
+                      max={data.funnel[0].count || 1}
+                      detail={`${f.count} · ${Math.round((f.count / (data.funnel[0].count || 1)) * 100)}%`}
+                      tone={i === data.funnel.length - 1 ? 'success' : 'primary'}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
 
-      {data && (
-        <>
-          {/* KPI cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-            <Kpi icon={PhoneCall} label="Total calls" value={data.totals.totalCalls} tint="indigo" />
-            <Kpi icon={TrendingUp} label="Conversion rate" value={`${data.totals.conversionRate}%`} tint="emerald" />
-            <Kpi icon={Clock} label="Avg duration" value={fmtDur(data.totals.avgDuration)} tint="sky" />
-            <Kpi icon={Target} label="Avg deal score" value={data.totals.avgDealScore} tint="amber" />
-            <Kpi icon={Users2} label="Engagement" value={`${data.totals.engagementRate}%`} tint="purple" />
-            <Kpi
-              icon={Radio}
-              label="Phone reach"
-              value={data.phone?.attempts ? `${data.phone.reachRate}%` : '—'}
-              hint={data.phone?.attempts ? `${data.phone.reached}/${data.phone.attempts} answered` : 'no phone calls'}
-              tint="rose"
-            />
-          </div>
+              <Card>
+                <SectionHeader
+                  icon={PieIcon}
+                  title="Status distribution"
+                  description="The summary the agent wrote after each conversation."
+                  className="px-5 pt-5"
+                />
+                <CardContent className="pt-0">
+                  {statusSlices.length === 0 ? (
+                    <p className="text-xs text-ink-muted py-8 text-center">No summarised calls in this window.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <PieChart>
+                        <Pie data={statusSlices} dataKey="count" nameKey="status"
+                          innerRadius={52} outerRadius={82} paddingAngle={3} stroke="none">
+                          {statusSlices.map(entry => (
+                            <Cell key={entry.status} fill={tokens[STATUS_TOKENS[entry.status] || 'inkMuted']} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<ChartTooltip />} />
+                        <Legend wrapperStyle={{ fontSize: 11, color: tokens.inkSoft }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
 
-          {/* Funnel + status */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card>
-              <CardHeader><CardTitle>Conversion funnel</CardTitle></CardHeader>
-              <CardContent className="space-y-2.5">
-                {data.funnel.map((f, i) => {
-                  const max = data.funnel[0].count || 1;
-                  const pct = Math.round((f.count / max) * 100);
-                  return (
-                    <div key={f.stage}>
-                      <div className="flex justify-between text-[11px] mb-1">
-                        <span className="font-bold text-slate-300">{f.stage}</span>
-                        <span className="text-slate-500 font-mono">{f.count} · {pct}%</span>
-                      </div>
-                      <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-emerald-500 transition-all"
-                          style={{ width: `${Math.max(pct, i === 0 ? 100 : 2)}%`, opacity: 1 - i * 0.13 }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle>Status distribution</CardTitle></CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={data.statusDistribution.filter(d => d.count > 0)} dataKey="count" nameKey="status"
-                      innerRadius={52} outerRadius={82} paddingAngle={3} stroke="none" label={false}>
-                      {data.statusDistribution.filter(d => d.count > 0).map(entry => (
-                        <Cell key={entry.status} fill={STATUS_COLORS[entry.status] || '#64748b'} />
-                      ))}
-                    </Pie>
-                    <Tooltip {...tooltipStyle} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                  </PieChart>
+              <SectionHeader
+                icon={TrendingUp}
+                title="Calls, conversions and deal score"
+                description="Daily totals for the selected window. The dashed line is the average deal score."
+                className="px-5 pt-5"
+              />
+              <CardContent className="pt-0">
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={data.daily}>
+                    <CartesianGrid stroke={tokens.line} strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="date" tick={axis} tickFormatter={shortDay} tickLine={false} axisLine={{ stroke: tokens.line }} />
+                    <YAxis tick={axis} allowDecimals={false} width={30} tickLine={false} axisLine={false} />
+                    {/* Deal score is a 0-100 average, so it gets its own right-hand scale. */}
+                    <YAxis yAxisId="score" orientation="right" domain={[0, 100]} tick={axis} width={30} tickLine={false} axisLine={false} />
+                    <Tooltip content={<ChartTooltip format={(key, value) => (key === 'avgDealScore' ? `${value}/100` : value)} />} />
+                    <Legend wrapperStyle={{ fontSize: 11, color: tokens.inkSoft }} />
+                    <Line type="monotone" dataKey="calls" name="Calls" stroke={tokens.primary} strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="conversions" name="Conversions" stroke={tokens.success} strokeWidth={2.5} dot={false} />
+                    <Line yAxisId="score" type="monotone" dataKey="avgDealScore" name="Deal score" stroke={tokens.warn} strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+                  </LineChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>
-          </div>
 
-          {/* Daily trend */}
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>Calls & conversions over time</CardTitle>
-                <CardDescription>Daily totals in the selected window</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={240}>
-                <LineChart data={data.daily}>
-                  <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#64748b' }} tickFormatter={d => d.slice(5)} />
-                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
-                  <Tooltip {...tooltipStyle} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line type="monotone" dataKey="calls" stroke="#6366f1" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="conversions" stroke="#10b981" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="avgDealScore" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <BreakdownCard title="By product" icon={Layers} rows={data.byProduct} />
+              <BreakdownCard title="By language" icon={Layers} rows={data.byLanguage} />
+              <BreakdownCard title="By channel" icon={Layers} rows={data.byChannel} />
+              <BreakdownCard
+                title="By call outcome"
+                icon={Target}
+                description="Phone attempts that connected, and why the rest did not."
+                rows={data.byOutcome}
+              />
+              <BreakdownCard title="By direction" icon={Users2} description="Inbound calls are counted per caller number." rows={data.byDirection} />
 
-          {/* Breakdowns */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <BreakdownCard title="By product" rows={data.byProduct} />
-            <BreakdownCard title="By language" rows={data.byLanguage} />
-            <BreakdownCard title="By channel" rows={data.byChannel} />
-            <BreakdownCard
-              title="By call outcome"
-              description="Phone attempts that connected, and why the rest did not"
-              rows={data.byOutcome}
-            />
-            <BreakdownCard title="By direction" rows={data.byDirection} />
-          </div>
+              <Card>
+                <SectionHeader
+                  icon={Users2}
+                  title="Lead pipeline"
+                  description="Where captured customers sit today."
+                  className="px-5 pt-5"
+                />
+                <CardContent className="pt-0">
+                  <ResponsiveContainer width="100%" height={170}>
+                    <BarChart data={data.leadPipeline}>
+                      <CartesianGrid stroke={tokens.line} strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="status" tick={axis} tickLine={false} axisLine={{ stroke: tokens.line }} />
+                      <YAxis tick={axis} allowDecimals={false} width={26} tickLine={false} axisLine={false} />
+                      <Tooltip content={<ChartTooltip />} cursor={{ fill: tokens.surface3 }} />
+                      <Bar dataKey="count" name="Customers" fill={tokens.violet} radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </div>
 
-          {/* Lead pipeline + recent statuses */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card>
-              <CardHeader><CardTitle>Lead pipeline</CardTitle></CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={data.leadPipeline}>
-                    <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
-                    <XAxis dataKey="status" tick={{ fontSize: 10, fill: '#64748b' }} />
-                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
-                    <Tooltip {...tooltipStyle} />
-                    <Bar dataKey="count" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>Top performers</CardTitle><CardDescription>Highest-scoring calls in window</CardDescription></CardHeader>
-              <CardContent>
+              <SectionHeader
+                icon={Trophy}
+                title="Top performing calls"
+                description="Highest deal scores in the window — open one to read the full transcript."
+                className="px-5 pt-5"
+              />
+              <CardContent className="pt-0">
                 {(!data.topCalls || data.topCalls.length === 0) ? (
-                  <p className="text-xs text-slate-500 py-4">No scored calls yet.</p>
+                  <p className="text-xs text-ink-muted py-6">No scored calls yet. Scores appear after a call is summarised.</p>
                 ) : (
-                  <div className="space-y-2">
+                  <ul className="space-y-2">
                     {data.topCalls.map(c => (
-                      <div key={c.id} className="flex items-center gap-3 text-xs bg-slate-950/50 rounded-xl px-3 py-2 border border-slate-800/60">
-                        <span className="font-bold text-white truncate flex-1">{c.customerName}</span>
-                        <StatusBadge status={c.status} />
-                        <span className="font-mono text-amber-400">{c.dealScore}</span>
-                      </div>
+                      <li key={c.id}>
+                        <Link
+                          to={`/history?call=${c.id}`}
+                          className="flex items-center gap-3 rounded-field border border-line bg-surface-3/50 px-3 py-2.5 hover:border-line-strong transition-colors"
+                        >
+                          <Avatar name={c.customerName} size="xs" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-semibold text-ink truncate">{c.customerName}</span>
+                            <span className="block text-[11px] text-ink-muted truncate">{c.product} · {formatDuration(c.duration || 0)}</span>
+                          </span>
+                          <StatusBadge status={c.status} />
+                          <span className="font-mono text-xs text-warn tabular-nums shrink-0">{c.dealScore}</span>
+                        </Link>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 )}
               </CardContent>
             </Card>
           </div>
-        </>
-      )}
-    </div>
+        )}
+      </LoadState>
+    </Page>
   );
 }
 
-function Kpi({ icon: Icon, label, value, tint, hint }) {
-  const tints = {
-    indigo: 'text-indigo-400 bg-indigo-500/10',
-    emerald: 'text-emerald-400 bg-emerald-500/10',
-    sky: 'text-sky-400 bg-sky-500/10',
-    amber: 'text-amber-400 bg-amber-500/10',
-    purple: 'text-purple-400 bg-purple-500/10',
-    rose: 'text-rose-400 bg-rose-500/10'
-  };
+function BreakdownCard({ title, icon, rows = [], description }) {
+  const max = Math.max(1, ...rows.map(r => r.calls));
   return (
     <Card>
-      <CardContent className="pt-5 pb-4">
-        <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center mb-3', tints[tint])}>
-          <Icon className="w-4 h-4" />
-        </div>
-        <div className="text-2xl font-extrabold text-white leading-none">{value}</div>
-        <div className="text-[11px] text-slate-500 font-semibold mt-1.5">{label}</div>
-        {hint && <div className="text-[10px] text-slate-600 mt-0.5">{hint}</div>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function BreakdownCard({ title, rows, description }) {
-  const max = Math.max(1, ...(rows || []).map(r => r.calls));
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        {description && <CardDescription className="ml-auto text-right">{description}</CardDescription>}
-      </CardHeader>
-      <CardContent className="space-y-2.5">
-        {(!rows || rows.length === 0) && <p className="text-xs text-slate-500">No data in window.</p>}
-        {(rows || []).slice(0, 5).map(r => (
-          <div key={r.name}>
-            <div className="flex justify-between text-[11px] mb-1">
-              <span className="font-semibold text-slate-300 truncate">{r.name}</span>
-              <span className="text-slate-500 font-mono shrink-0 ml-2">{r.calls} calls · {r.conversions} won · {fmtDur(r.avgDuration)}</span>
-            </div>
-            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${(r.calls / max) * 100}%` }} />
-            </div>
-          </div>
+      <SectionHeader icon={icon} title={title} description={description} className="px-5 pt-5" />
+      <CardContent className="pt-0 space-y-3">
+        {rows.length === 0 && <p className="text-xs text-ink-muted">Nothing recorded in this window.</p>}
+        {rows.slice(0, 5).map(r => (
+          <MeterRow
+            key={r.name}
+            name={r.name}
+            value={r.calls}
+            max={max}
+            detail={`${r.calls} ${r.calls === 1 ? 'call' : 'calls'} · ${r.conversions} won · ${formatDuration(r.avgDuration || 0)}`}
+          />
         ))}
       </CardContent>
     </Card>
   );
-}
-
-function fmtDur(s) {
-  if (!s) return '0s';
-  return s >= 60 ? `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ''}` : `${s}s`;
 }

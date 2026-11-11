@@ -25,14 +25,14 @@ The repository is split into two independently deployable apps:
 | **Voice conversation** | Speaks via Web Speech TTS, listens via Web Speech STT with **auto-restart**, **barge-in** (interrupt the bot), and trailing-silence turn detection. |
 | **AI engine (Groq)** | Chat: `llama-3.3-70b-versatile`. Phone STT: `whisper-large-v3-turbo`. Phone TTS: `canopylabs/orpheus-v1-english`. |
 | **Zero-key demo mode** | Works with no API key using a built-in consultative rule engine. **When a Groq key is set, replies are real LLM output** — and if the LLM call fails you now see an explicit error instead of a silent fallback. |
-| **Multilingual** | English, Hindi, Telugu for browser calls (native TTS voices). Phone channel TTS is English-only (Groq Orpheus limitation). |
+| **Multilingual** | English, Hindi, Telugu, Malayalam, Tamil and Arabic for browser calls — the list lives in `frontend/src/lib/languages.js`, replies and scripts in `backend/src/services/salesEngine.js`. Spoken output uses the operating-system voice installed for that locale, so an unseen language falls back to the default voice while text and replies stay in the chosen language. Phone channel TTS is English-only (Groq Orpheus limitation). |
 | **Live transcript** | Real-time bubbles with timestamps, interim speech preview, quick-reply prompts, and a typed-input fallback that works without a microphone. |
 | **Recording & consent** | Consent modal, microphone capture via MediaRecorder, uploaded to the backend and playable per call. |
 | **AI summary** | Overview, requirements, objections, next steps, sentiment, and 0–100 deal score. |
 | **Sales status** | Converted / Interested / Follow-up Required / Not Interested / Demo Requested / No Response. |
 | **Analytics dashboard** | KPI cards, conversion funnel, time-series trends, and breakdowns by product, language, channel, call outcome and direction. |
 | **Lead CRM** | Auto-extracts prospect name/company/email/phone/intent from each call, pipeline stages, notes, and CSV/JSON export. |
-| **Demo vs live modes** | `/call` is the browser-voice demo (no credentials needed); `/phone` is real telephony. Both feed the same history, analytics and CRM. |
+| **Demo vs live modes** | `/agent` has two tabs: **Browser demo** (voice, no credentials needed) and **Live phone** (real telephony). Old `/call` and `/phone` URLs redirect to them. Both feed the same history, analytics and CRM. |
 | **Phone telephony (Twilio)** | Inbound + outbound calls over Media Streams → Groq STT/LLM/TTS on the API port, with barge-in, per-attempt outcome tracking (busy / no-answer / rejected / failed / canceled), concurrency cap and a lost-callback watchdog. |
 
 ---
@@ -119,12 +119,11 @@ All env reading lives in `backend/src/config/env.js`; no other module reads
 | `VITE_API_BASE_URL` | Backend origin. **Empty in dev/local**; set to e.g. `https://voicepitch-api.onrender.com` when the SPA is hosted separately. Inlined at build time. |
 | `VITE_PROXY_TARGET` | Dev-server proxy target if the API isn't on `localhost:3001`. |
 
-**Two ways to provide the Groq key:**
-1. **Server-wide** — `GROQ_API_KEY` in `backend/.env`. Everyone gets live AI.
-2. **Per-browser** — paste it in **Settings → AI engine** (kept in `localStorage`,
-   sent per request; a non-empty browser key wins over the server one).
-
-The Settings page reads `GET /api/health` to show which mode is actually live.
+**The Groq key is server-only.** `GROQ_API_KEY` in `backend/.env` is read by the
+API process and never travels to the browser: no request body carries a key, none
+is written to `localStorage`, and none appears in exports. **AI Settings** reads
+`GET /api/health` to show which provider, models and telephony mode are actually
+live, and there is deliberately no field to paste a key.
 
 ---
 
@@ -142,17 +141,27 @@ frontend/
 ├── .env.example
 └── src/
     ├── main.jsx                   # React root (no StrictMode: it breaks the speech lifecycle)
-    ├── App.jsx                    # Router + React Query + toast providers
-    ├── pages/                     # CallPage (browser demo), PhonePage (live Twilio), History, Analytics, Leads, Settings
+    ├── App.jsx                    # Router + React Query + theme + toast providers
+    ├── pages/                     # Overview, AgentPage (browser demo + live Twilio tabs),
+    │                              # Customers, Import, History, Analytics,
+    │                              # AISettings, Profile, Help
     ├── components/
-    │   ├── AppShell.jsx           # Sidebar/nav layout, product + health context
+    │   ├── AppShell.jsx           # Rail + top bar layout, product/health context
+    │   ├── shell/                 # Sidebar, Topbar, GlobalSearch, NotificationsBell, ProfileMenu, Page
+    │   ├── agent/                 # DemoPanel, LivePanel, CallSummaryDialog
+    │   ├── Transcript.jsx         # One transcript view shared by live call and history
     │   ├── AudioVisualizer.jsx    # Canvas waveform (real mic spectrum while listening)
-    │   ├── ProductPicker.jsx      # Preset + custom SaaS product dialog
-    │   └── ui/                    # button, card, badge, dialog, input, table, toast
+    │   ├── ProductPicker.jsx      # Catalog + custom SaaS product dialog
+    │   └── ui/                    # button, card, badge, dialog, input, table, tabs,
+    │                              # toast, tooltip, toggle, avatar, skeleton, stat-card,
+    │                              # progress, empty-state, page-header
+    ├── context/theme.jsx          # Design tokens: dark/light, useThemeTokens() for charts
     ├── hooks/useCallSession.js    # Call state machine: turns, recording, summary, lead extract
     ├── services/                  # api.js (all HTTP), speechService.js (Web Speech), audioRecorder.js
-    ├── lib/cn.js                  # class-name merger (clsx + tailwind-merge)
-    └── styles/index.css           # Tailwind layers + scrollbars + glow utilities
+    ├── lib/                       # nav.js (one nav list), languages.js (the supported languages
+    │                              # + their speech locales), customers.js (identity + CRM merge),
+    │                              # notifications.js (bell feed), profile.js (device prefs), cn.js
+    └── styles/index.css           # Token variables for both themes + Tailwind layers
 ```
 
 There is deliberately no `src/assets/` yet: the favicon is an inline SVG data URI in
@@ -219,7 +228,7 @@ backend/
 
 Two separate modes, on purpose:
 
-| | Demo — `/call` | Live — `/phone` |
+| | Demo — `/agent` (Browser demo tab) | Live — `/agent?mode=live` (Live phone tab) |
 | :--- | :--- | :--- |
 | Audio | your browser mic + OS speech | the public switched telephone network |
 | Needs | nothing | Twilio number + `GROQ_API_KEY` |

@@ -1,94 +1,79 @@
 import React, { useEffect, useRef } from 'react';
 import { callRecorder } from '../services/audioRecorder.js';
+import { useThemeTokens } from '../context/theme.jsx';
 
+const BARS = 32;
+const BAR_WIDTH = 4;
+
+// Real microphone spectrum while listening; a gentle synthetic wave otherwise,
+// because text-to-speech output is not captured by the mic recorder.
 export default function AudioVisualizer({ callStatus, isBotSpeaking, isCustomerSpeaking }) {
   const canvasRef = useRef(null);
+  const tokens = useThemeTokens();
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return undefined;
     const ctx = canvas.getContext('2d');
-    let animationFrameId;
+    let frame;
     let phase = 0;
 
     const render = () => {
-      // Handle high DPI
-      const width = canvas.width;
-      const height = canvas.height;
+      const { width, height } = canvas;
       ctx.clearRect(0, 0, width, height);
 
       const isLive = callStatus !== 'idle' && callStatus !== 'ended';
-      const numBars = 32;
-      const barWidth = 4;
-      const spacing = (width - numBars * barWidth) / (numBars + 1);
-
-      // Real microphone spectrum when the customer channel is active; synthetic
-      // wave otherwise (bot TTS output is not captured by the mic recorder).
+      const spacing = (width - BARS * BAR_WIDTH) / (BARS + 1);
       const freqData = (isCustomerSpeaking || (isLive && !isBotSpeaking))
         ? callRecorder.getAudioFrequencyData()
         : null;
 
-      let barColor = 'rgba(148, 163, 184, 0.4)'; // slate-400 idle
-      if (isBotSpeaking) {
-        barColor = 'rgba(99, 102, 241, 0.85)'; // indigo
-      } else if (isCustomerSpeaking) {
-        barColor = 'rgba(16, 185, 129, 0.85)'; // emerald
-      } else if (isLive) {
-        barColor = 'rgba(129, 140, 248, 0.5)'; // subtle pulse
-      }
+      const top = isBotSpeaking ? tokens.primary : isCustomerSpeaking ? tokens.success : isLive ? tokens.electric : tokens.inkMuted;
+      const bottom = isBotSpeaking ? tokens.violet : isCustomerSpeaking ? tokens.success : isLive ? tokens.primary : tokens.inkMuted;
+      const alpha = isLive ? 0.9 : 0.4;
 
       phase += 0.08;
 
-      for (let i = 0; i < numBars; i++) {
-        const x = spacing + i * (barWidth + spacing);
+      for (let i = 0; i < BARS; i++) {
+        const x = spacing + i * (BAR_WIDTH + spacing);
         let barHeight;
 
         if (freqData && freqData.length > 0) {
-          const bin = freqData[Math.floor((i / numBars) * freqData.length)] || 0;
+          const bin = freqData[Math.floor((i / BARS) * freqData.length)] || 0;
           barHeight = Math.max(4, (bin / 255) * (height - 8));
         } else {
-          const targetAmplitude = isBotSpeaking ? 26 : isCustomerSpeaking ? 24 : isLive ? 8 : 4;
-          const wave = Math.sin(phase + (i * 0.35)) * Math.cos(phase * 0.7 + (i * 0.2));
-          barHeight = Math.max(4, Math.abs(wave) * targetAmplitude + (isLive ? 4 : 2));
+          const amplitude = isBotSpeaking ? 26 : isCustomerSpeaking ? 24 : isLive ? 8 : 4;
+          const wave = Math.sin(phase + i * 0.35) * Math.cos(phase * 0.7 + i * 0.2);
+          barHeight = Math.max(4, Math.abs(wave) * amplitude + (isLive ? 4 : 2));
         }
 
         const y = (height - barHeight) / 2;
+        const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
+        gradient.addColorStop(0, top);
+        gradient.addColorStop(1, bottom);
+        ctx.fillStyle = gradient;
+        ctx.globalAlpha = alpha;
 
-        if (isBotSpeaking) {
-          const grad = ctx.createLinearGradient(0, y, 0, y + barHeight);
-          grad.addColorStop(0, '#818cf8');
-          grad.addColorStop(1, '#4f46e5');
-          ctx.fillStyle = grad;
-        } else {
-          const grad = ctx.createLinearGradient(0, y, 0, y + barHeight);
-          grad.addColorStop(0, isCustomerSpeaking ? '#34d399' : '#64748b');
-          grad.addColorStop(1, isCustomerSpeaking ? '#059669' : '#475569');
-          ctx.fillStyle = grad;
-        }
-
-        // Rounded bars
         ctx.beginPath();
-        ctx.roundRect(x, y, barWidth, barHeight, 2);
+        ctx.roundRect(x, y, BAR_WIDTH, barHeight, 2);
         ctx.fill();
       }
 
-      animationFrameId = requestAnimationFrame(render);
+      frame = requestAnimationFrame(render);
     };
 
     render();
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-    };
-  }, [callStatus, isBotSpeaking, isCustomerSpeaking]);
+    return () => cancelAnimationFrame(frame);
+  }, [callStatus, isBotSpeaking, isCustomerSpeaking, tokens]);
 
   return (
-    <div className="w-full flex items-center justify-center py-2 px-4 bg-slate-900/60 backdrop-blur-sm rounded-xl border border-slate-800">
-      <canvas 
-        ref={canvasRef} 
-        width={360} 
-        height={48} 
-        className="w-full max-w-[360px] h-12"
+    <div className="flex w-full items-center justify-center rounded-card border border-line bg-surface-3/50 px-4 py-3">
+      <canvas
+        ref={canvasRef}
+        width={360}
+        height={48}
+        aria-hidden="true"
+        className="h-12 w-full max-w-[360px]"
       />
     </div>
   );
