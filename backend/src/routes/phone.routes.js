@@ -1,4 +1,5 @@
 import { Router } from 'express';
+
 import {
   phoneConfig,
   phoneDial,
@@ -7,8 +8,11 @@ import {
   phoneCallRefresh,
   phoneCallHangup
 } from '../controllers/phone.controller.js';
+import { requireAuth } from '../middleware/require-auth.js';
 
 const router = Router();
+
+router.use(requireAuth);
 
 router.get('/config', phoneConfig);
 router.post('/dial', phoneDial);

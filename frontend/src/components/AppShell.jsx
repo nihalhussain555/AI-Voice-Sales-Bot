@@ -6,10 +6,8 @@ import { Bot, X } from 'lucide-react';
 import { api } from '../services/api.js';
 import { cn } from '../lib/cn.js';
 import { buildNotifications, markRead, readIds, NOTIFICATIONS_EVENT } from '../lib/notifications.js';
-import {
-  getProfile, getSidebarCollapsed, getCustomProducts, setSidebarCollapsed,
-  SIDEBAR_EVENT, CUSTOM_PRODUCTS_EVENT, PROFILE_EVENT
-} from '../lib/profile.js';
+import { getSidebarCollapsed, setSidebarCollapsed, SIDEBAR_EVENT } from '../lib/profile.js';
+import { useWorkspace } from '../hooks/useWorkspace.js';
 import ProductPicker from './ProductPicker.jsx';
 import Sidebar, { NavList } from './shell/Sidebar.jsx';
 import Topbar from './shell/Topbar.jsx';
@@ -20,12 +18,11 @@ export function useApp() {
 
 export default function AppShell() {
   const location = useLocation();
+  const workspace = useWorkspace();
   const [collapsed, setCollapsed] = useState(getSidebarCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [productKey, setProductKey] = useState(() => localStorage.getItem('vp_product') || 'devpulse');
   const [seen, setSeen] = useState(readIds);
-  const [profile, setProfile] = useState(getProfile);
 
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 30000 });
   const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: api.products });
@@ -35,21 +32,14 @@ export default function AppShell() {
   const { data: leadsData } = useQuery({ queryKey: ['leads'], queryFn: api.leads });
 
   const products = productsData?.products || [];
-  const [customTick, setCustomTick] = useState(0);
-  const storedCustom = useMemo(() => getCustomProducts(), [customTick]);
-  const allProducts = [...storedCustom, ...products];
-  const product = allProducts.find(p => p.id === productKey) || allProducts[0] || null;
+  const allProducts = [...workspace.customProducts, ...products];
+  const product = allProducts.find(p => p.id === workspace.productKey) || allProducts[0] || null;
 
   const notifications = useMemo(
     () => buildNotifications({ calls: callsData?.calls || [], leads: leadsData?.leads || [] }),
     [callsData, leadsData]
   );
   const unread = notifications.filter(item => !seen.has(item.id)).length;
-
-  const selectProduct = (p) => {
-    setProductKey(p.id);
-    localStorage.setItem('vp_product', p.id);
-  };
 
   const toggleCollapsed = () => setSidebarCollapsed(!collapsed);
 
@@ -63,16 +53,8 @@ export default function AppShell() {
 
   useEffect(() => {
     const onSidebar = (event) => setCollapsed(event.detail);
-    const onCustomProducts = () => setCustomTick(tick => tick + 1);
-    const onProfile = () => setProfile(getProfile());
     window.addEventListener(SIDEBAR_EVENT, onSidebar);
-    window.addEventListener(CUSTOM_PRODUCTS_EVENT, onCustomProducts);
-    window.addEventListener(PROFILE_EVENT, onProfile);
-    return () => {
-      window.removeEventListener(SIDEBAR_EVENT, onSidebar);
-      window.removeEventListener(CUSTOM_PRODUCTS_EVENT, onCustomProducts);
-      window.removeEventListener(PROFILE_EVENT, onProfile);
-    };
+    return () => window.removeEventListener(SIDEBAR_EVENT, onSidebar);
   }, []);
 
   useEffect(() => {
@@ -93,7 +75,13 @@ export default function AppShell() {
     };
   }, [drawerOpen]);
 
-  const outletContext = { product, products: allProducts, selectProduct, openProductPicker: () => setPickerOpen(true), health };
+  const outletContext = {
+    product,
+    products: allProducts,
+    selectProduct: workspace.selectProduct,    workspace,
+    openProductPicker: () => setPickerOpen(true),
+    health
+  };
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -150,7 +138,6 @@ export default function AppShell() {
           notifications={notifications}
           unread={unread}
           onMarkAllRead={markAllRead}
-          profile={profile}
           onOpenMobileNav={() => setDrawerOpen(true)}
         />
 
@@ -177,7 +164,7 @@ export default function AppShell() {
         onClose={() => setPickerOpen(false)}
         products={allProducts}
         active={product}
-        onSelect={selectProduct}
+        onSelect={workspace.selectProduct}
       />
     </div>
   );

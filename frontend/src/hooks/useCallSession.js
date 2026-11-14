@@ -102,7 +102,7 @@ export default function useCallSession({ product, language, onError, onCallSaved
       const data = await api.chat({
         message: customerText,
         history: transcriptRef.current,
-        product: productRef.current,
+        productKey: productRef.current?.id,
         language: languageRef.current
       });
       speakReply(data.reply);
@@ -134,7 +134,7 @@ export default function useCallSession({ product, language, onError, onCallSaved
         const data = await api.chat({
           message: '',
           history: [],
-          product: productRef.current,
+          productKey: productRef.current?.id,
           language: languageRef.current
         });
         speakReply(data.reply);

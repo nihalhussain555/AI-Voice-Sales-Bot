@@ -1,6 +1,7 @@
-// Analytics aggregation over the call history.
+// Analytics aggregation over one user's call history. The caller supplies the
+// rows; this module never reaches for the store itself, so it cannot read past
+// the signed-in workspace by accident.
 
-import { db } from '../models/db.js';
 import { outcomeLabel } from '../utils/phone.js';
 
 const STATUSES = ['Converted', 'Demo Requested', 'Interested', 'Follow-up Required', 'Not Interested', 'No Response'];
@@ -15,8 +16,8 @@ function dayKey(iso) {
   return new Date(iso).toISOString().slice(0, 10);
 }
 
-export function buildAnalytics({ days = 30, from = null, to = null, calls = null, leads = [] } = {}) {
-  if (!calls) calls = db.getCalls();
+export function buildAnalytics({ days = 30, from = null, to = null, calls = [], leads = [] } = {}) {
+  if (!Array.isArray(calls)) calls = [];
 
   let fromTs = from ? new Date(from).getTime() : null;
   let toTs = to ? new Date(to).getTime() : null;

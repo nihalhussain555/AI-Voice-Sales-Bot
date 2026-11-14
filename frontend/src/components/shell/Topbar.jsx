@@ -28,7 +28,7 @@ function ThemeToggle() {
   );
 }
 
-export default function Topbar({ products, notifications, unread, onMarkAllRead, profile, product, onOpenMobileNav }) {
+export default function Topbar({ products, notifications, unread, onMarkAllRead, product, onOpenMobileNav }) {
   const { pathname } = useLocation();
   const title = pageTitle(pathname);
 
@@ -51,7 +51,7 @@ export default function Topbar({ products, notifications, unread, onMarkAllRead,
         <GlobalSearch products={products} className="w-32 shrink-0 sm:w-56 lg:w-80" />
         <NotificationsBell items={notifications} unread={unread} onMarkAll={onMarkAllRead} />
         <ThemeToggle />
-        <ProfileMenu profile={profile} product={product} />
+        <ProfileMenu product={product} />
       </div>
     </header>
   );

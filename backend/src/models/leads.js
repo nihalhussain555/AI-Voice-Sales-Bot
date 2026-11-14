@@ -1,53 +1,38 @@
-// CRM-lite: lead records extracted from calls, plus CSV/JSON export helpers.
-
-import fs from 'fs';
-import path from 'path';
+// CRM-lite: the customer list belonging to one authenticated user, plus
+// CSV/JSON export helpers. Every function is scoped by the owner's id — see
+// models/store.js for where those records live.
 
 import { db } from './db.js';
+import { readCollection, writeCollection } from './store.js';
 import { groqChat, parseJsonLoose, resolveApiKey } from '../services/groqClient.js';
-import { paths } from '../config/env.js';
 
-const LEADS_FILE = path.join(paths.data, 'leads.json');
+const COLLECTION = 'leads';
 
 const PIPELINE = ['New', 'Contacted', 'Qualified', 'Won', 'Lost'];
 
-function readLeads() {
-  try {
-    if (!fs.existsSync(LEADS_FILE)) return [];
-    return JSON.parse(fs.readFileSync(LEADS_FILE, 'utf-8'));
-  } catch {
-    return [];
-  }
+function read(userId) {
+  const rows = readCollection(userId, COLLECTION, []);
+  return Array.isArray(rows) ? rows : [];
 }
 
-function writeLeads(leads) {
-  try {
-    fs.mkdirSync(path.dirname(LEADS_FILE), { recursive: true });
-    fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2));
-    return true;
-  } catch (err) {
-    console.error('leads: write failed:', err.message);
-    return false;
-  }
+export function getLeads(userId) {
+  return read(userId).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
 }
 
-export function getLeads() {
-  return readLeads().sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-}
-
-export function saveLead(patch) {
-  const leads = readLeads();
+export function saveLead(userId, patch) {
+  const leads = read(userId);
   const now = new Date().toISOString();
-  const existingIdx = patch.callId ? leads.findIndex(l => l.callId === patch.callId) : -1;
+  const existingIdx = patch.callId ? leads.findIndex((l) => l.callId === patch.callId) : -1;
 
   if (existingIdx !== -1) {
-    leads[existingIdx] = { ...leads[existingIdx], ...patch, updatedAt: now };
-    writeLeads(leads);
+    leads[existingIdx] = { ...leads[existingIdx], ...patch, userId, id: leads[existingIdx].id, updatedAt: now };
+    writeCollection(userId, COLLECTION, leads);
     return leads[existingIdx];
   }
 
   const lead = {
     id: patch.id || `lead-${Date.now()}`,
+    userId,
     callId: patch.callId || null,
     name: patch.name || 'Unknown prospect',
     company: patch.company || '',
@@ -62,31 +47,35 @@ export function saveLead(patch) {
     updatedAt: now
   };
   leads.unshift(lead);
-  writeLeads(leads);
+  writeCollection(userId, COLLECTION, leads);
   return lead;
 }
 
-export function updateLead(id, patch) {
-  const leads = readLeads();
-  const idx = leads.findIndex(l => l.id === id);
+export function updateLead(userId, id, patch) {
+  const leads = read(userId);
+  const idx = leads.findIndex((l) => l.id === id);
   if (idx === -1) return null;
-  if (patch.pipelineStatus && !PIPELINE.includes(patch.pipelineStatus)) delete patch.pipelineStatus;
-  leads[idx] = { ...leads[idx], ...patch, id, updatedAt: new Date().toISOString() };
-  writeLeads(leads);
+  // Ownership and identity are not patchable, whatever the body claims.
+  const safe = { ...(patch || {}) };
+  delete safe.id;
+  delete safe.userId;
+  if (!safe.pipelineStatus || !PIPELINE.includes(safe.pipelineStatus)) delete safe.pipelineStatus;
+  leads[idx] = { ...leads[idx], ...safe, id, userId, updatedAt: new Date().toISOString() };
+  writeCollection(userId, COLLECTION, leads);
   return leads[idx];
 }
 
-export function deleteLead(id) {
-  const leads = readLeads();
-  const next = leads.filter(l => l.id !== id);
+export function deleteLead(userId, id) {
+  const leads = read(userId);
+  const next = leads.filter((l) => l.id !== id);
   if (next.length === leads.length) return false;
-  writeLeads(next);
+  writeCollection(userId, COLLECTION, next);
   return true;
 }
 
 // Extract structured lead info from a saved call's transcript.
-export async function extractLeadFromCall(callId, bodyKey = null) {
-  const call = db.getCalls().find(c => c.id === callId);
+export async function extractLeadFromCall(userId, callId) {
+  const call = db.getCallById(userId, callId);
   if (!call) {
     const err = new Error('Call not found');
     err.status = 404;
@@ -94,10 +83,12 @@ export async function extractLeadFromCall(callId, bodyKey = null) {
   }
 
   const transcriptText = (call.transcript || [])
-    .map(m => `${m.sender.toUpperCase()}: ${m.text}`)
+    .map((m) => `${m.sender.toUpperCase()}: ${m.text}`)
     .join('\n');
 
-  const apiKey = resolveApiKey(bodyKey);
+  // The server's own Groq key only: an extract request no longer chooses which
+  // account gets billed for the call.
+  const apiKey = resolveApiKey();
   let extracted = null;
 
   if (apiKey && transcriptText) {
@@ -107,7 +98,7 @@ export async function extractLeadFromCall(callId, bodyKey = null) {
         messages: [
           { role: 'system', content: 'You extract CRM lead data from sales-call transcripts. Respond ONLY with valid JSON.' },
           {
-            role: 'user',
+            role: "user",
             content: `From this sales call transcript, extract the prospect's details. Return JSON:
 {"name": string|null, "company": string|null, "email": string|null, "phone": string|null, "intent": "hot"|"warm"|"cold"|"unknown", "objections": [string], "followUpNote": string}
 If a field is not mentioned, use null.
@@ -136,7 +127,7 @@ ${transcriptText.slice(0, 6000)}`
     ? (call.direction === 'inbound' ? call.from : call.to) || ''
     : '';
 
-  const lead = saveLead({
+  const lead = saveLead(userId, {
     callId: call.id,
     name: extracted?.name || call.customerName || 'Unknown prospect',
     company: extracted?.company || call.company || '',
@@ -202,14 +193,16 @@ function normaliseRecord(raw) {
   };
 }
 
-// Validate a CSV batch against the store and optionally write it.
+// Validate a CSV batch against this user's list and optionally write it.
 // dryRun is what the import preview calls, so the numbers shown before
 // confirming are produced by exactly the same rules as the real import.
-export function importLeads(records, { dryRun = false, limit = 5000 } = {}) {
+// Duplicate detection is deliberately scoped to the owner's own records: the
+// same prospect may legitimately exist in two customers' workspaces.
+export function importLeads(userId, records, { dryRun = false, limit = 5000 } = {}) {
   const input = Array.isArray(records) ? records.slice(0, limit) : [];
-  const leads = readLeads();
-  const byEmail = new Map(leads.filter(l => l.email).map(l => [String(l.email).toLowerCase(), l]));
-  const byPhone = new Map(leads.filter(l => l.phone).map(l => [phoneKey(l.phone), l]));
+  const leads = read(userId);
+  const byEmail = new Map(leads.filter((l) => l.email).map((l) => [String(l.email).toLowerCase(), l]));
+  const byPhone = new Map(leads.filter((l) => l.phone).map((l) => [phoneKey(l.phone), l]));
 
   const result = {
     dryRun,
@@ -269,6 +262,7 @@ export function importLeads(records, { dryRun = false, limit = 5000 } = {}) {
   const stamp = Date.now();
   const newLeads = accepted.map((record, i) => ({
     id: `lead-${stamp}-${i}`,
+    userId,
     callId: null,
     name: record.name,
     company: record.company,
@@ -283,7 +277,7 @@ export function importLeads(records, { dryRun = false, limit = 5000 } = {}) {
     updatedAt: now
   }));
 
-  writeLeads([...newLeads, ...leads]);
+  writeCollection(userId, COLLECTION, [...newLeads, ...leads]);
   result.imported = newLeads.length;
   // Keep the response small; the UI only needs to show what landed.
   result.created = newLeads.slice(0, 50).map(({ id, name, company, email, phone }) => ({ id, name, company, email, phone }));
@@ -300,13 +294,13 @@ function csvEscape(v) {
 }
 
 export function toCsv(rows, columns) {
-  const header = columns.map(c => csvEscape(c.label || c.key)).join(',');
-  const lines = rows.map(r => columns.map(c => csvEscape(typeof c.get === 'function' ? c.get(r) : r[c.key])).join(','));
+  const header = columns.map((c) => csvEscape(c.label || c.key)).join(',');
+  const lines = rows.map((r) => columns.map((c) => csvEscape(typeof c.get === 'function' ? c.get(r) : r[c.key])).join(','));
   return [header, ...lines].join('\r\n');
 }
 
-export function callsCsv() {
-  return toCsv(db.getCalls(), [
+export function callsCsv(userId) {
+  return toCsv(db.getCalls(userId), [
     { key: 'id' },
     { label: 'date', key: 'timestamp' },
     { key: 'customerName' },
@@ -322,15 +316,15 @@ export function callsCsv() {
     { label: 'to_number', key: 'to' },
     { label: 'twilio_error_code', key: 'twilioErrorCode' },
     { label: 'duration_seconds', key: 'duration' },
-    { label: 'deal_score', get: c => c.summary?.dealScore ?? '' },
-    { label: 'sentiment', get: c => c.summary?.sentiment ?? '' },
-    { label: 'transcript_turns', get: c => (c.transcript || []).length },
+    { label: 'deal_score', get: (c) => c.summary?.dealScore ?? '' },
+    { label: 'sentiment', get: (c) => c.summary?.sentiment ?? '' },
+    { label: 'transcript_turns', get: (c) => (c.transcript || []).length },
     { label: 'recording_url', key: 'recordingUrl' }
   ]);
 }
 
-export function leadsCsv() {
-  return toCsv(getLeads(), [
+export function leadsCsv(userId) {
+  return toCsv(getLeads(userId), [
     { key: 'id' },
     { key: 'name' },
     { key: 'company' },
@@ -339,7 +333,7 @@ export function leadsCsv() {
     { key: 'product' },
     { key: 'intent' },
     { label: 'pipeline_status', key: 'pipelineStatus' },
-    { label: 'objections', get: l => (l.objections || []).join(' | ') },
+    { label: 'objections', get: (l) => (l.objections || []).join(' | ') },
     { label: 'notes', key: 'notes' },
     { label: 'call_id', key: 'callId' },
     { label: 'created_at', key: 'createdAt' }

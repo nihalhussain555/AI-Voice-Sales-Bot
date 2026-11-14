@@ -22,9 +22,16 @@ const leadsRoutes = (await import('../routes/leads.routes.js')).default;
 const { apiError } = await import('../middleware/error-handler.js');
 
 const csv = (...lines) => lines.join('\r\n');
-// Top-level tests run in order, and the store is a real file, so each counting
-// test starts from a clean slate.
-const resetStore = () => fs.writeFileSync(path.join(DATA_DIR, 'leads.json'), '[]');
+
+// Customer lists are per-account now, so this suite works as one fixed owner and
+// resets that owner's file. Top-level tests run in order, and the store is a real
+// file, so each counting test starts from a clean slate.
+const OWNER = 'import-tester';
+const leadsFile = path.join(DATA_DIR, 'users', OWNER, 'leads.json');
+const resetStore = () => {
+  fs.mkdirSync(path.dirname(leadsFile), { recursive: true });
+  fs.writeFileSync(leadsFile, '[]');
+};
 
 after(() => fs.rmSync(DATA_DIR, { recursive: true, force: true }));
 
@@ -74,12 +81,12 @@ test('importLeads splits valid, invalid and duplicate rows and writes nothing on
     { name: 'Alpha Again', email: 'ALPHA@acme.com' }                       // duplicate of row 1 by email
   ];
 
-  const preview = importLeads(records, { dryRun: true });
+  const preview = importLeads(OWNER, records, { dryRun: true });
   assert.deepEqual(
     { total: preview.total, valid: preview.valid, imported: preview.imported, invalid: preview.invalid.length, duplicates: preview.duplicates.length },
     { total: 8, valid: 2, imported: 0, invalid: 4, duplicates: 2 }
   );
-  assert.equal(getLeads().length, 0, 'a preview never writes');
+  assert.equal(getLeads(OWNER).length, 0, 'a preview never writes');
   assert.deepEqual(preview.invalid.map(r => r.name), ['', 'Bad Email', 'No Contacts', 'Tiny Phone']);
   assert.match(preview.invalid[2].reason, /phone number or an email/i);
   const phoneDupe = preview.duplicates.find(d => d.name === 'Beta Client');
@@ -94,25 +101,31 @@ test('a real import persists customers, and re-importing the same file finds onl
     { name: 'Ravi K.', phone: '+14155550199', notes: 'asked for pricing' }
   ];
 
-  const first = importLeads(records, { dryRun: false });
+  const first = importLeads(OWNER, records, { dryRun: false });
   assert.equal(first.imported, 2);
-  assert.equal(getLeads().length, 2);
-  const stored = getLeads().find(l => l.name === 'Priya N.');
+  assert.equal(getLeads(OWNER).length, 2);
+  const stored = getLeads(OWNER).find(l => l.name === 'Priya N.');
   assert.equal(stored.pipelineStatus, 'Contacted', 'stage is matched case-insensitively');
   assert.equal(stored.intent, 'warm');
   assert.equal(stored.email, 'priya@example.com');
   assert.match(stored.id, /^lead-\d+-\d+$/, 'bulk ids stay unique even inside one millisecond');
 
-  const second = importLeads(records, { dryRun: false });
+  const second = importLeads(OWNER, records, { dryRun: false });
   assert.equal(second.imported, 0);
   assert.equal(second.duplicates.length, 2);
-  assert.equal(getLeads().length, 2, 're-import never duplicates a customer');
+  assert.equal(getLeads(OWNER).length, 2, 're-import never duplicates a customer');
 });
 
 // ---- Route contract --------------------------------------------------------
 
 async function serve() {
   const app = express();
+  // The whole leads surface is account-scoped; this suite signs in as OWNER and
+  // cross-tenant blocking is covered by the auth suite.
+  app.use((req, _res, next) => {
+    req.user = { id: OWNER, email: 'import@example.com', fullName: 'Import Tester', status: 'active' };
+    next();
+  });
   app.use('/api/leads', leadsRoutes);
   app.use(apiError);
   const server = await new Promise((resolve) => {

@@ -1,15 +1,19 @@
-// Multer disk storage for browser call recordings.
+// Multer disk storage for browser call recordings. Each file lands inside the
+// uploading user's own recordings folder, so one account cannot overwrite or
+// read another's audio by guessing a filename.
 
 import path from 'path';
 import multer from 'multer';
 
-import { paths, ensureDataDirs } from '../config/env.js';
-
-ensureDataDirs();
+import { userRecordingsDir } from '../models/store.js';
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, paths.recordings);
+    try {
+      cb(null, userRecordingsDir(req.user.id));
+    } catch (err) {
+      cb(err);
+    }
   },
   filename: function (req, file, cb) {
     // Derive extension from the actual mime type so WAV/OGG blobs are not

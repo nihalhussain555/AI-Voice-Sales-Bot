@@ -1,20 +1,34 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, UserRound, MonitorSmartphone } from 'lucide-react';
+import { ChevronDown, UserRound, SlidersHorizontal, LogOut, MonitorSmartphone } from 'lucide-react';
 import { cn } from '../../lib/cn.js';
 import useDismiss from '../../hooks/useDismiss.js';
 import Avatar from '../ui/avatar.jsx';
+import { useAuth } from '../../context/auth.jsx';
 
-// No sign-in exists in this build, so the menu is explicit about where the
-// profile lives instead of imitating an account system.
-export default function ProfileMenu({ profile, product }) {
+// The signed-in identity, read from the account the server described at
+// bootstrap. Nothing here is invented: the name, email and picture all come
+// from /api/auth/me.
+export default function ProfileMenu({ product }) {
+  const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const navigate = useNavigate();
   const ref = useDismiss({ open, onClose: () => setOpen(false), returnFocus: true });
 
   const go = (to) => {
     setOpen(false);
     navigate(to);
+  };
+
+  const signOut = async () => {
+    if (signingOut) return;
+    setOpen(false);
+    setSigningOut(true);
+    // logout() navigates to /login itself and clears the query cache; the flag
+    // only covers the round-trip, after which this component is unmounted.
+    await logout();
   };
 
   return (
@@ -32,9 +46,9 @@ export default function ProfileMenu({ profile, product }) {
             : 'border-line bg-surface-2/60 hover:bg-surface-2 hover:border-line-strong'
         )}
       >
-        <Avatar name={profile.name} size="xs" />
+        <Avatar name={user?.fullName} src={user?.avatarUrl} size="xs" />
         <span className="hidden max-w-[9rem] truncate text-[12px] font-semibold text-ink sm:block">
-          {profile.name}
+          {user?.fullName || 'Account'}
         </span>
         <ChevronDown className={cn('hidden w-3.5 h-3.5 text-ink-muted transition-transform sm:block', open && 'rotate-180')} />
       </button>
@@ -45,10 +59,10 @@ export default function ProfileMenu({ profile, product }) {
           className="absolute right-0 top-[calc(100%+8px)] z-50 w-[min(92vw,19rem)] overflow-hidden rounded-card border border-line bg-surface shadow-lifted animate-scale-in"
         >
           <div className="flex items-center gap-3 border-b border-line px-4 py-3.5">
-            <Avatar name={profile.name} size="md" />
+            <Avatar name={user?.fullName} src={user?.avatarUrl} size="md" />
             <div className="min-w-0">
-              <p className="truncate text-[13px] font-bold text-ink">{profile.name}</p>
-              <p className="truncate text-[11px] text-ink-muted">{profile.role} · this browser only</p>
+              <p className="truncate text-[13px] font-bold text-ink">{user?.fullName}</p>
+              <p className="truncate text-[11px] text-ink-muted">{user?.email}</p>
             </div>
           </div>
 
@@ -67,13 +81,32 @@ export default function ProfileMenu({ profile, product }) {
               className="flex w-full items-center gap-2.5 rounded-field px-2.5 py-2 text-left text-[12px] font-semibold text-ink-soft transition-colors hover:bg-surface-2 hover:text-ink"
             >
               <UserRound className="w-4 h-4 text-ink-muted" />
-              Profile &amp; settings
+              Profile &amp; security
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => go('/ai-settings')}
+              className="flex w-full items-center gap-2.5 rounded-field px-2.5 py-2 text-left text-[12px] font-semibold text-ink-soft transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              <SlidersHorizontal className="w-4 h-4 text-ink-muted" />
+              Agent &amp; providers
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={signOut}
+              disabled={signingOut}
+              className="flex w-full items-center gap-2.5 rounded-field px-2.5 py-2 text-left text-[12px] font-semibold text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
+            >
+              <LogOut className="w-4 h-4" />
+              {signingOut ? 'Signing out' : 'Sign out'}
             </button>
           </div>
 
           <p className="border-t border-line bg-surface-2/50 px-4 py-2.5 text-[10px] leading-relaxed text-ink-muted">
-            VoicePitch AI runs without a login in this build. Your name, theme and product choice
-            are stored locally on this device.
+            Signing out revokes this session on the server.{' '}
+            <Link to="/help" className="font-semibold text-primary-hover hover:underline">Help &amp; support</Link>
           </p>
         </div>
       )}

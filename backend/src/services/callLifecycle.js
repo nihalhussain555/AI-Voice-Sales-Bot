@@ -20,7 +20,11 @@ const RETENTION_MS = 30 * 60 * 1000; // finished attempts stay queryable
 const MAX_RETAINED = 200;
 const WATCHDOG_GRACE_MS = 2 * 60 * 1000;
 
-export function createCallLifecycle({ db, summarize, config = () => ({}), log = () => {} } = {}) {
+// createCallLifecycle options:
+//   db            call store — every save is `db.saveCall(userId, record)`
+//   resolveUserId owner for a call that arrives with no session to attribute it
+//                 to (an inbound Twilio call), or null to keep it unowned
+export function createCallLifecycle({ db, summarize, config = () => ({}), resolveUserId = () => null, log = () => {} } = {}) {
   const attempts = new Map(); // callSid -> attempt
 
   function now() { return Date.now(); }
@@ -44,6 +48,9 @@ export function createCallLifecycle({ db, summarize, config = () => ({}), log = 
 
     const attempt = {
       callSid,
+      // Whose workspace this call lands in. An outbound dial carries the signed-in
+      // user; an inbound call has no session, so it takes the default account.
+      userId: fields.userId || resolveUserId() || null,
       mode: fields.mode || 'live-phone',
       channel: 'phone',
       direction: fields.direction || 'outbound',
@@ -238,6 +245,7 @@ export function createCallLifecycle({ db, summarize, config = () => ({}), log = 
       // Stable id: a second attempt to persist the same Twilio call can never
       // create a duplicate history row.
       id: `call-phone-${attempt.callSid}`,
+      userId: attempt.userId || null,
       channel: 'phone',
       mode: attempt.mode,
       direction: attempt.direction,
@@ -268,7 +276,13 @@ export function createCallLifecycle({ db, summarize, config = () => ({}), log = 
       log(`no db injected — call ${attempt.callSid} not persisted`);
       return;
     }
-    const saved = db.saveCall(record);
+    const owner = attempt.userId || resolveUserId();
+    if (!owner) {
+      log(`call ${attempt.callSid} has no owner and no default account — not persisted`);
+      return;
+    }
+    const saved = db.saveCall(owner, record);
+    attempt.userId = owner;
     attempt.callId = saved.id;
     log(`attempt ${attempt.callSid} persisted outcome=${attempt.outcome} status=${status} turns=${transcript.length} src=${source}`);
   }
@@ -299,8 +313,13 @@ export function createCallLifecycle({ db, summarize, config = () => ({}), log = 
     }
   }
 
-  function list({ activeOnly = false } = {}) {
-    const all = [...attempts.values()].sort((a, b) => b.startedAt - a.startedAt);
+  // Attempts are process-wide (Twilio callbacks address them by CallSid), but a
+  // caller may only list its own. Without a userId this returns everything, which
+  // is used by internal diagnostics only — never by a route handler.
+  function list({ activeOnly = false, userId = null } = {}) {
+    let all = [...attempts.values()];
+    if (userId) all = all.filter((a) => (a.userId || null) === userId);
+    all.sort((a, b) => b.startedAt - a.startedAt);
     return activeOnly ? all.filter((a) => !a.terminal) : all;
   }
 

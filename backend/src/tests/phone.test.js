@@ -52,11 +52,26 @@ function useEnv(overrides = {}) {
   };
 }
 
+// The app-facing phone routes are account-scoped now. Telephony is one shared
+// process-wide pipeline (Twilio addresses attempts by CallSid, not by session),
+// so the tests sign every request in as one fixed workspace owner.
+const TEST_USER = { id: 'user-test-1', email: 'owner@example.com', fullName: 'Test Owner', status: 'active' };
+
 function makeDb() {
   return {
     rows: [],
-    saveCall(call) { this.rows.push(call); return call; },
-    getCalls() { return this.rows; }
+    // Mirrors models/db.js: the owner is stamped by the store, never trusted
+    // from the record, and a repeat save for the same id updates in place.
+    saveCall(userId, call) {
+      const record = { ...call, userId };
+      const i = this.rows.findIndex((r) => r.id === record.id);
+      if (i >= 0) this.rows[i] = record;
+      else this.rows.push(record);
+      return record;
+    },
+    getCalls(userId) {
+      return userId ? this.rows.filter((r) => r.userId === userId) : this.rows;
+    }
   };
 }
 
@@ -110,6 +125,9 @@ async function startStack({ overrides = {}, db = makeDb(), summarize, providers,
   const lifecycle = createCallLifecycle({
     db,
     summarize: summarize || (async () => ({ status: 'Interested', overview: 'stub', requirements: [], objections: [], nextSteps: [], sentiment: 'Positive', dealScore: 50 })),
+    // An inbound Twilio call carries no session; in production it is attributed
+    // to the account that owns the number, here to the single test owner.
+    resolveUserId: () => TEST_USER.id,
     config: () => ({
       maxCallMinutes: Number(process.env.MAX_CALL_MINUTES || 15),
       maxConcurrentCalls: Number(process.env.TWILIO_MAX_CONCURRENT_CALLS || 3),
@@ -128,6 +146,10 @@ async function startStack({ overrides = {}, db = makeDb(), summarize, providers,
   const app = express();
   app.locals.phoneService = phoneService;
   app.use(telephony.router);
+  app.use('/api/phone', (req, _res, next) => {
+    req.user = TEST_USER;
+    next();
+  });
   app.use('/api/phone', phoneRoutes);
   app.use(apiError);
 

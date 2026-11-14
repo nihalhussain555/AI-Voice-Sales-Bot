@@ -1,10 +1,64 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
-import { resolveAsset } from '../../services/api.js';
+import { fetchAuthenticatedBlob } from '../../services/api.js';
 import { Badge, StatusBadge } from '../ui/badge.jsx';
 import { Button } from '../ui/button.jsx';
 import Dialog from '../ui/dialog.jsx';
 import { SectionHeader } from '../ui/page-header.jsx';
+
+// Recordings are served per owner, so the URL is not public: the browser has to
+// ask for it as the signed-in user and play the blob it gets back. An
+// <audio src> would be a subresource request, which withholds the session
+// cookie whenever the API is on another origin.
+function Recording({ url }) {
+  const [state, setState] = useState({ status: 'loading', href: null });
+
+  useEffect(() => {
+    if (!url) return undefined;
+    let alive = true;
+    let objectUrl = null;
+    setState({ status: 'loading', href: null });
+
+    fetchAuthenticatedBlob(url)
+      .then((href) => {
+        if (!alive) {
+          URL.revokeObjectURL(href);
+          return;
+        }
+        objectUrl = href;
+        setState({ status: 'ready', href });
+      })
+      .catch(() => { if (alive) setState({ status: 'error', href: null }); });
+
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  if (state.status === 'loading') {
+    return <p className="text-[11px] text-ink-muted">Loading recording…</p>;
+  }
+  if (state.status === 'error') {
+    return (
+      <p className="text-[11px] leading-relaxed text-danger">
+        This recording could not be loaded. It may have been removed from the server.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <audio controls src={state.href} className="w-full" />
+      <a
+        href={state.href}
+        download="call-recording.webm"
+        className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-ink-muted transition-colors hover:text-ink"
+      >
+        <Download className="w-3.5 h-3.5" /> Download recording
+      </a>
+    </div>
+  );
+}
 
 function SummaryList({ title, items }) {
   if (!items?.length) return null;
@@ -52,7 +106,7 @@ export function CallSummaryBody({ call }) {
       {call.recordingUrl && (
         <div>
           <SectionHeader title="Call recording" className="mb-1.5" />
-          <audio controls src={resolveAsset(call.recordingUrl)} className="w-full" />
+          <Recording url={call.recordingUrl} />
         </div>
       )}
     </div>
@@ -69,18 +123,7 @@ export default function CallSummaryDialog({ open, onClose, call }) {
       title="Call summary"
       description="Generated from the transcript as soon as the call ended."
       footer={
-        <>
-          {call.recordingUrl && (
-            <a
-              href={resolveAsset(call.recordingUrl)}
-              download="call-recording.webm"
-              className="mr-auto inline-flex items-center gap-2 text-xs font-semibold text-ink-muted transition-colors hover:text-ink"
-            >
-              <Download className="w-3.5 h-3.5" /> Download recording
-            </a>
-          )}
-          <Button variant="secondary" onClick={onClose}>Close</Button>
-        </>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
       }
     >
       <CallSummaryBody call={call} />

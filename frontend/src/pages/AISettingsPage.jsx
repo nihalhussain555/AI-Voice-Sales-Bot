@@ -25,8 +25,8 @@ export default function AISettingsPage() {
   const [copied, setCopied] = useState(false);
 
   const personaQuery = useQuery({
-    queryKey: ['agent-persona', product?.id || 'custom', language],
-    queryFn: () => api.agentPersona({ product, language })
+    queryKey: ['agent-persona', product?.id || 'devpulse', language],
+    queryFn: () => api.agentPersona({ productKey: product?.id, language })
   });
   const phoneQuery = useQuery({ queryKey: ['phone-config'], queryFn: api.phoneConfig });
   const callsQuery = useQuery({ queryKey: ['calls'], queryFn: api.calls });

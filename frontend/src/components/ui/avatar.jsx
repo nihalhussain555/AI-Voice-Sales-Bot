@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { cn } from '../../lib/cn.js';
 
 const PALETTE = [
@@ -24,19 +24,24 @@ function initials(name = '') {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// Deterministic tint: the same customer keeps the same colour across pages,
-// and no image request is made for a profile photo the backend cannot serve.
+// Deterministic tint: the same person keeps the same colour across pages, so a
+// list of contacts is scannable without anybody uploading anything.
 function tintFor(seed) {
   let hash = 0;
   for (const ch of String(seed || '')) hash = (hash * 31 + ch.charCodeAt(0)) % 9973;
   return PALETTE[hash % PALETTE.length];
 }
 
-export default function Avatar({ name, size = 'md', className, ring }) {
+// A picture is only as trustworthy as the link the account stores, so a 404 or
+// a blocked request falls back to the initials rather than leaving a blank disc.
+export default function Avatar({ name, src, size = 'md', className, ring }) {
+  const [failed, setFailed] = useState(false);
+  const showImage = src && !failed;
+
   return (
     <span
       className={cn(
-        'inline-flex items-center justify-center rounded-full font-bold shrink-0 select-none',
+        'inline-flex items-center justify-center overflow-hidden rounded-full font-bold shrink-0 select-none',
         SIZES[size], tintFor(name),
         ring && 'ring-2 ring-surface',
         className
@@ -44,7 +49,17 @@ export default function Avatar({ name, size = 'md', className, ring }) {
       title={name || undefined}
       aria-label={name ? `${name} avatar` : undefined}
     >
-      {initials(name)}
+      {showImage ? (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        initials(name)
+      )}
     </span>
   );
 }

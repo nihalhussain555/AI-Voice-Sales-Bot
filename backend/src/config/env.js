@@ -45,6 +45,24 @@ export const serverConfig = {
     && fs.existsSync(path.join(paths.frontendDist, 'index.html'))
 };
 
+// Sessions ride on cookies, so a credentialed CORS response must echo an exact
+// origin — '*' is illegal together with Access-Control-Allow-Credentials and the
+// browser rejects it anyway. An unset/wildcard CORS_ORIGIN therefore means
+// "same-origin only", which is how local dev (Vite proxy) and single-port
+// deploys already work; a split frontend must list its origin explicitly.
+const DEV_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+export function corsOriginAllowed(origin) {
+  if (!origin) return false;
+  if (serverConfig.env !== 'production' && DEV_ORIGIN_RE.test(origin)) return true;
+  if (serverConfig.corsOrigin === '*') return false;
+  return serverConfig.corsOrigin
+    .split(',')
+    .map((entry) => entry.trim().replace(/\/+$/, ''))
+    .filter(Boolean)
+    .includes(origin.replace(/\/+$/, ''));
+}
+
 export const groqConfig = {
   chatModel: process.env.GROQ_CHAT_MODEL || 'llama-3.3-70b-versatile',
   sttModel: process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo',
@@ -66,6 +84,67 @@ export const twilioConfig = () => ({
   statusCallback: enabled(process.env.TWILIO_STATUS_CALLBACK, true),
   maxConcurrentCalls: positiveInt(process.env.TWILIO_MAX_CONCURRENT_CALLS, 3)
 });
+
+// ── Authentication ──────────────────────────────────────────────────────────
+// Sessions are opaque random tokens (never JWTs) so they can be revoked
+// immediately; only a SHA-256 hash of the token is stored, so a data-file leak
+// cannot be replayed against the API.
+export const SESSION_COOKIE = 'vp_session';
+
+const duration = (value, fallbackMs) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 60000) : fallbackMs;
+};
+
+export const authConfig = {
+  // Idle window: an active session is extended while it is used.
+  sessionTtlMs: duration(process.env.SESSION_TTL_MINUTES, 12 * 60 * 60 * 1000),
+  // "Remember me" gets a longer idle window, still revoked on logout/password change.
+  rememberTtlMs: duration(process.env.REMEMBER_TTL_MINUTES, 30 * 24 * 60 * 60 * 1000),
+  resetTtlMs: duration(process.env.RESET_TTL_MINUTES, 30 * 60 * 1000),
+  cookieName: SESSION_COOKIE,
+  // 'lax' blocks the cookie on cross-site XHR (CSRF) and is what same-origin
+  // dev and single-port deploys need. Only set 'none' for a split-domain
+  // deployment, and only over HTTPS — 'none' without Secure is rejected.
+  cookieSameSite: ['lax', 'strict', 'none'].includes(process.env.COOKIE_SAME_SITE)
+    ? process.env.COOKIE_SAME_SITE
+    : 'lax',
+  cookieSecure: enabled(process.env.COOKIE_SECURE, (process.env.NODE_ENV || 'development') === 'production'),
+  maxUsers: positiveInt(process.env.MAX_USERS, 0), // 0 = unlimited
+  passwordMinLength: positiveInt(process.env.PASSWORD_MIN_LENGTH, 8),
+  // Login throttling per email+IP, and looser per-IP limits for signup and
+  // password-reset requests. The env vars are minutes; the fallbacks are already
+  // milliseconds, matching duration()'s contract.
+  loginWindowMs: duration(process.env.LOGIN_RATE_WINDOW_MINUTES, 15 * 60 * 1000),
+  loginMax: positiveInt(process.env.LOGIN_RATE_MAX, 8),
+  signupWindowMs: duration(process.env.SIGNUP_RATE_WINDOW_MINUTES, 60 * 60 * 1000),
+  signupMax: positiveInt(process.env.SIGNUP_RATE_MAX, 10),
+  forgotWindowMs: duration(process.env.FORGOT_RATE_WINDOW_MINUTES, 15 * 60 * 1000),
+  forgotMax: positiveInt(process.env.FORGOT_RATE_MAX, 5)
+};
+
+// Password-reset mail. Without SMTP the reset flow still mints a real, stored,
+// single-use token — it just cannot be delivered, so the API reports a
+// configuration error instead of pretending an email went out.
+export const mailConfig = () => ({
+  host: process.env.SMTP_HOST || '',
+  port: positiveInt(process.env.SMTP_PORT, 587),
+  secure: enabled(process.env.SMTP_SECURE, false),
+  user: process.env.SMTP_USER || '',
+  password: process.env.SMTP_PASSWORD || '',
+  from: process.env.MAIL_FROM || process.env.SMTP_USER || 'VoicePitch AI <no-reply@voicepitch.local>',
+  // Where a reset link points. Falls back to the Twilio public URL, then the
+  // local dev server, so the flow is testable without extra configuration.
+  appBaseUrl: (process.env.APP_BASE_URL || process.env.PUBLIC_BASE_URL || 'http://localhost:5173').replace(/\/+$/, ''),
+  // Development convenience only: prints the reset link to the server console
+  // when there is no SMTP transport. Never included in an HTTP response.
+  echoInConsole: enabled(process.env.AUTH_ECHO_RESET_LINK, (process.env.NODE_ENV || 'development') !== 'production')
+});
+
+export function mailConfigured() {
+  const m = mailConfig();
+  return Boolean(m.host && m.from);
+}
 
 // What the phone feature can actually do right now, with the reason when it
 // can't. Inbound needs only the API credentials (the number's webhook is set in

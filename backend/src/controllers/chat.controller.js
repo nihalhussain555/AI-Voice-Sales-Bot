@@ -1,18 +1,28 @@
 import { generateTurn } from '../services/salesTurn.js';
+import { getSettings } from '../models/settings.js';
 
 // One conversational sales turn.
+//
+// The product is chosen by id and resolved against the signed-in user's own
+// custom products; a request body used to be able to carry a whole product
+// definition, which meant the agent's prompt came from the client instead of
+// from the user's saved configuration.
 export async function chat(req, res) {
   try {
     const {
       message,
       history = [],
       productKey = 'devpulse',
-      customProduct = null,
-      language = 'English',
-      apiKey = null
+      language = 'English'
     } = req.body;
 
-    const result = await generateTurn({ message, history, productKey, customProduct, language, apiKey });
+    const result = await generateTurn({
+      message,
+      history,
+      productKey,
+      language,
+      userProducts: getSettings(req.user.id).customProducts
+    });
     return res.json(result);
   } catch (error) {
     console.error('Chat error:', error);

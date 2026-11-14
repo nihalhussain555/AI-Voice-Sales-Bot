@@ -31,8 +31,11 @@ export function createPhoneService({
   }
 
   // Real outbound call: Twilio dials the customer, our websocket carries the
-  // audio, and the sales agent answers live.
-  async function dial({ to, productKey = 'devpulse', customerName = null } = {}) {
+  // audio, and the sales agent answers live. `userId` is the signed-in account the
+  // call belongs to; every row it produces lands in that workspace.
+  async function dial({ userId, to, productKey = 'devpulse', customerName = null } = {}) {
+    if (!userId) throw httpError(401, 'A signed-in account is required to place a call');
+
     const ready = readiness();
     if (!ready.dialReady) {
       throw httpError(503, `Live calling is not configured — set ${ready.dialMissing.join(', ')} in backend/.env`, {
@@ -60,7 +63,7 @@ export function createPhoneService({
     // attempt is registered under a token that rides along inside the TwiML
     // <Parameter> and is adopted once the REST response returns.
     const dialToken = `dial-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-    const product = resolveProduct(productKey, null);
+    const product = resolveProduct(productKey);
 
     const twiml = twilioClient.buildConnectTwiML({
       wsUrl: wsUrlFor(cfg.publicBaseUrl),
@@ -76,6 +79,7 @@ export function createPhoneService({
         // Twilio refused before the call ever existed: record why, then surface it.
         const attempt = lifecycle.startAttempt({
           callSid: dialToken,
+          userId,
           direction: 'outbound',
           from: cfg.phoneNumber,
           to: number,
@@ -96,6 +100,7 @@ export function createPhoneService({
 
     const attempt = lifecycle.startAttempt({
       callSid: dialToken,
+      userId,
       direction: 'outbound',
       from: cfg.phoneNumber,
       to: number,
@@ -117,9 +122,20 @@ export function createPhoneService({
     };
   }
 
-  async function hangup(callSid) {
+  // Call attempts are addressed by Twilio's CallSid, which is a secret but not a
+  // capability: guessing or being shown one must not let a second account steer
+  // somebody else's call. Anything not owned by the caller answers 404, the same
+  // as an id that does not exist.
+  function ownedAttempt(userId, callSid) {
     const attempt = lifecycle.get(callSid);
-    if (!attempt) throw httpError(404, `No such call attempt: ${callSid}`);
+    if (!attempt || (attempt.userId || null) !== (userId || null)) {
+      throw httpError(404, `No such call attempt: ${callSid}`);
+    }
+    return attempt;
+  }
+
+  async function hangup(userId, callSid) {
+    const attempt = ownedAttempt(userId, callSid);
     if (attempt.terminal) {
       return { ...lifecycle.snapshot(attempt), alreadyEnded: true };
     }
@@ -142,9 +158,8 @@ export function createPhoneService({
 
   // Pull the authoritative status from Twilio. Callbacks normally deliver this,
   // but a lost callback (server restart, ngrok URL change) is recoverable.
-  async function refresh(callSid) {
-    const attempt = lifecycle.get(callSid);
-    if (!attempt) throw httpError(404, `No such call attempt: ${callSid}`);
+  async function refresh(userId, callSid) {
+    const attempt = ownedAttempt(userId, callSid);
     if (attempt.terminal) return lifecycle.snapshot(attempt);
     try {
       const live = await twilioClient.fetchCall(callSid);
@@ -165,17 +180,16 @@ export function createPhoneService({
     return lifecycle.snapshot(lifecycle.get(callSid));
   }
 
-  function attempts({ activeOnly = false } = {}) {
-    return lifecycle.list({ activeOnly }).map((a) => lifecycle.snapshot(a));
+  function attempts({ userId = null, activeOnly = false } = {}) {
+    return lifecycle.list({ userId, activeOnly }).map((a) => lifecycle.snapshot(a));
   }
 
-  function attempt(callSid) {
-    const found = lifecycle.get(callSid);
-    if (!found) throw httpError(404, `No such call attempt: ${callSid}`);
+  function attempt(userId, callSid) {
+    const found = ownedAttempt(userId, callSid);
     return lifecycle.snapshot(found);
   }
 
-  function status() {
+  function status(userId = null) {
     const ready = readiness();
     const cfg = config();
     return {
@@ -191,7 +205,7 @@ export function createPhoneService({
       maxConcurrentCalls: cfg.maxConcurrentCalls,
       maxCallMinutes: cfg.maxCallMinutes,
       activeCalls: lifecycle.activeCount(),
-      calls: attempts(),
+      calls: attempts({ userId }),
       outcomes: Object.values(OUTCOME).map((value) => ({ value, label: outcomeLabel(value) }))
     };
   }
