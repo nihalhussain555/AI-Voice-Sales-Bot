@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 
 import { useAuth } from '../../context/auth.jsx';
+import { BrandMark } from '../ui/brand.jsx';
 
 // While the bootstrap probe is in flight the app knows nothing. Rendering the
 // console anyway would fire a dozen unauthenticated requests and bounce a
@@ -10,7 +11,7 @@ import { useAuth } from '../../context/auth.jsx';
 function Splash({ label }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-canvas-deep text-ink">
-      <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-primary to-violet shadow-glow" />
+      <BrandMark size="lg" />
       <p className="inline-flex items-center gap-2 text-[12px] font-semibold text-ink-muted">
         <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
         {label}

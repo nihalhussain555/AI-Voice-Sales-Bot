@@ -1,8 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Bot, ShieldCheck, PhoneCall, LockKeyhole } from 'lucide-react';
+import { ShieldCheck, PhoneCall, LockKeyhole } from 'lucide-react';
 
 import { cn } from '../../lib/cn.js';
+import { BrandMark, BrandWordmark } from '../ui/brand.jsx';
 
 // The signed-out shell: the same navy/purple brand language as the console,
 // with the card left intact rather than dissolving into the page.
@@ -20,14 +21,12 @@ export default function AuthLayout({ title, subtitle, children, footer, wide = f
 
       <div className="relative flex min-h-screen flex-col">
         <header className="px-5 py-5 sm:px-8">
-          <Link to="/" className="inline-flex items-center gap-2.5 group">
-            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-violet flex items-center justify-center shadow-glow transition-transform group-hover:scale-105">
-              <Bot className="w-[18px] h-[18px] text-white" />
+          <Link to="/" className="group inline-flex min-w-0 flex-col">
+            <span className="flex min-w-0 items-center gap-3 transition-transform duration-200 group-hover:scale-[1.03]">
+              <BrandMark labelled={false} size="lg" />
+              <BrandWordmark size="lg" />
             </span>
-            <span className="leading-tight">
-              <span className="block text-[13px] font-extrabold tracking-tight text-ink">VoicePitch AI</span>
-              <span className="block text-[9px] font-bold uppercase tracking-[0.16em] text-ink-muted">Autonomous sales AE</span>
-            </span>
+            <span className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-ink-muted">Autonomous sales AE</span>
           </Link>
         </header>
 

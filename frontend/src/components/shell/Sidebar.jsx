@@ -1,8 +1,9 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Layers, PanelLeftClose, PanelLeftOpen, KeyRound, PhoneCall } from 'lucide-react';
+import { Layers, PanelLeftClose, PanelLeftOpen, KeyRound, PhoneCall } from 'lucide-react';
 import { cn } from '../../lib/cn.js';
 import { NAV_GROUPS } from '../../lib/nav.js';
+import { BrandMark, BrandWordmark } from '../ui/brand.jsx';
 import Tooltip from '../ui/tooltip.jsx';
 
 function NavItem({ to, label, icon: Icon, collapsed, onNavigate }) {
@@ -106,13 +107,13 @@ export default function Sidebar({ collapsed, onToggleCollapse, health, product, 
       )}
     >
       <div className={cn('flex items-center h-16 border-b border-line shrink-0', collapsed ? 'justify-center px-2' : 'gap-2.5 px-4')}>
-        <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-violet flex items-center justify-center shadow-glow shrink-0">
-          <Bot className="w-[18px] h-[18px] text-white" />
-        </div>
-        {!collapsed && (
+        {collapsed ? <BrandMark /> : (
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-extrabold tracking-tight text-ink truncate">VoicePitch AI</div>
-            <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-ink-muted">Autonomous sales AE</div>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <BrandMark labelled={false} />
+              <BrandWordmark />
+            </div>
+            <div className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-ink-muted">Autonomous sales AE</div>
           </div>
         )}
         <button

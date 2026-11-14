@@ -138,6 +138,18 @@
   background-size: 18px 18px;
 }
 
+/* Brand art ships in a dark-canvas and a light-canvas cut of the same logo;
+   exactly one of each pair is in the layout at a time. */
+.brand-art-on-light {
+  display: none;
+}
+[data-theme='light'] .brand-art {
+  display: none;
+}
+[data-theme='light'] .brand-art-on-light {
+  display: block;
+}
+
 /* fadeIn is referenced by chat + history transcripts */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }

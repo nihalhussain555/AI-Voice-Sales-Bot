@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useOutletContext } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Bot, X } from 'lucide-react';
+import { X } from 'lucide-react';
 
 import { api } from '../services/api.js';
 import { cn } from '../lib/cn.js';
@@ -11,6 +11,7 @@ import { useWorkspace } from '../hooks/useWorkspace.js';
 import ProductPicker from './ProductPicker.jsx';
 import Sidebar, { NavList } from './shell/Sidebar.jsx';
 import Topbar from './shell/Topbar.jsx';
+import { BrandMark, BrandWordmark } from './ui/brand.jsx';
 
 export function useApp() {
   return useOutletContext();
@@ -100,12 +101,12 @@ export default function AppShell() {
           <div className="absolute inset-0 bg-[rgb(var(--scrim))]" onClick={() => setDrawerOpen(false)} />
           <div className="absolute inset-y-0 left-0 flex w-[min(19rem,86vw)] flex-col border-r border-line bg-surface shadow-lifted animate-slide-in">
             <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-line px-4">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-violet flex items-center justify-center shadow-glow">
-                <Bot className="w-[18px] h-[18px] text-white" />
-              </div>
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-extrabold tracking-tight text-ink">VoicePitch AI</div>
-                <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-ink-muted">Autonomous sales AE</div>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <BrandMark labelled={false} />
+                  <BrandWordmark />
+                </div>
+                <div className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-ink-muted">Autonomous sales AE</div>
               </div>
               <button
                 type="button"
